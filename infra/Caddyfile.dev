@@ -1,15 +1,22 @@
 :4000 {
-	# API service — strip /api prefix
+	# Live apps — served straight from filesystem, no process needed
+	handle_path /apps/* {
+		root * apps
+		try_files {path} {path}/index.html
+		file_server
+	}
+
+	# API service
 	handle_path /api/* {
 		reverse_proxy localhost:3001
 	}
 
-	# Claude editing service + chat UI — strip /claude prefix
+	# Claude editing service + chat UI
 	handle_path /claude/* {
 		reverse_proxy localhost:3002
 	}
 
-	# JWKS (needs to be accessible at root)
+	# JWKS
 	handle /.well-known/* {
 		reverse_proxy localhost:3001
 	}

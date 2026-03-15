@@ -135,6 +135,137 @@ app.post("/sessions/:id/kill", async (c) => {
   return c.json({ killed: true });
 });
 
+// ---------- apps — hot deployed frontends ----------
+
+import { existsSync, mkdirSync, readdirSync, writeFileSync, statSync } from "fs";
+import { join } from "path";
+
+const APPS_DIR = join(PROJECT_ROOT, "apps");
+
+// list all apps
+app.get("/apps", async (c) => {
+  mkdirSync(APPS_DIR, { recursive: true });
+  const apps = readdirSync(APPS_DIR)
+    .filter((f) => statSync(join(APPS_DIR, f)).isDirectory())
+    .map((name) => ({
+      name,
+      url: `/apps/${name}/`,
+      created: statSync(join(APPS_DIR, name)).birthtime,
+    }));
+  return c.json(apps);
+});
+
+// create an app from raw files — instantly live, no restart
+app.post("/apps", async (c) => {
+  const { name, files } = await c.req.json();
+  if (!name) return c.json({ error: "name is required" }, 400);
+
+  const appDir = join(APPS_DIR, name);
+
+  if (files && typeof files === "object") {
+    // write files directly: { "index.html": "<html>...", "app.js": "..." }
+    mkdirSync(appDir, { recursive: true });
+    for (const [filename, content] of Object.entries(files)) {
+      const filePath = join(appDir, filename);
+      // support nested paths
+      mkdirSync(join(filePath, ".."), { recursive: true });
+      writeFileSync(filePath, content as string);
+    }
+
+    return c.json({
+      app: name,
+      url: `/apps/${name}/`,
+      files: Object.keys(files),
+      live: true,
+    }, 201);
+  }
+
+  return c.json({ error: "provide files: { 'index.html': '...' }" }, 400);
+});
+
+// create an app via Claude — give it a prompt, it builds the app
+app.post("/apps/generate", async (c) => {
+  const { name, prompt } = await c.req.json();
+  if (!name || !prompt) return c.json({ error: "name and prompt required" }, 400);
+
+  const appDir = join(APPS_DIR, name);
+  mkdirSync(appDir, { recursive: true });
+
+  // build the meta-prompt — tell Claude to create a self-contained app
+  const metaPrompt = `Create a self-contained web app in the directory ${appDir}.
+
+The app will be served as static files at /apps/${name}/ — it needs at minimum an index.html.
+It can talk to the API at /api/ (same origin). Auth tokens are stored in localStorage as 'upend_token'.
+Use the Bearer token in Authorization headers for API calls.
+
+The API has these endpoints:
+- POST /api/auth/signup — { email, password } → { user, token }
+- POST /api/auth/login — { email, password } → { user, token }
+- GET /api/data/:table — list rows (requires auth)
+- POST /api/data/:table — create row (requires auth)
+- PATCH /api/data/:table/:id — update row (requires auth)
+- DELETE /api/data/:table/:id — delete row (requires auth)
+
+Keep it simple. Single page app. No build step. No framework unless needed.
+Use modern CSS and vanilla JS unless the prompt specifically asks for a framework.
+
+User's request: ${prompt}`;
+
+  // fire claude — no snapshot needed, this is just writing new files
+  const proc = Bun.spawn(
+    ["claude", "-p", metaPrompt, "--output-format", "stream-json", "--verbose"],
+    {
+      cwd: PROJECT_ROOT,
+      env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "upend", DISABLE_PROMPT: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    }
+  );
+
+  // stream progress via pg notify
+  const channel = `app_${name}`;
+  const reader = proc.stdout.getReader();
+  const decoder = new TextDecoder();
+
+  (async () => {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split("\n").filter(Boolean)) {
+        const payload = JSON.stringify({ type: "chunk", raw: line, ts: Date.now() });
+        await sql`SELECT pg_notify(${channel}, ${payload})`;
+      }
+    }
+    const exitCode = await proc.exited;
+    const status = exitCode === 0 ? "complete" : "error";
+    const payload = JSON.stringify({ type: "status", status, ts: Date.now() });
+    await sql`SELECT pg_notify(${channel}, ${payload})`;
+  })();
+
+  return c.json({
+    app: name,
+    url: `/apps/${name}/`,
+    status: "generating",
+    stream: `/apps/${name}/stream`,
+  }, 202);
+});
+
+// stream app generation progress
+app.get("/apps/:name/stream", (c) => {
+  const name = c.req.param("name");
+  return streamSSE(c, async (stream) => {
+    const channel = `app_${name}`;
+    await sql.listen(channel, (payload) => {
+      stream.writeSSE({ data: payload, event: "update" });
+    });
+    const keepAlive = setInterval(() => {
+      stream.writeSSE({ data: "", event: "ping" });
+    }, 15_000);
+    stream.onAbort(() => clearInterval(keepAlive));
+  });
+});
+
 // ---------- snapshots / rollback ----------
 
 app.get("/snapshots", async (c) => {

@@ -6,6 +6,11 @@
 		file_server
 	}
 
+	# Drizzle Studio
+	handle_path /studio/* {
+		reverse_proxy localhost:4983
+	}
+
 	# API service
 	handle_path /api/* {
 		reverse_proxy localhost:3001
@@ -21,8 +26,10 @@
 		reverse_proxy localhost:3001
 	}
 
-	# Default → API
+	# Default → dashboard shell
 	handle {
-		reverse_proxy localhost:3001
+		root * services/dashboard/public
+		try_files {path} /index.html
+		file_server
 	}
 }

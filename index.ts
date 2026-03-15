@@ -1,4 +1,4 @@
-// upend entry point — starts all services + caddy reverse proxy
+// upend entry point — starts all services + caddy + drizzle studio
 
 const services = await Bun.file("infra/services.json").json() as Record<string, { entry: string; port: number; env: string }>;
 
@@ -12,6 +12,14 @@ for (const [name, config] of Object.entries(services)) {
   });
 }
 
+// start drizzle studio on :4983
+console.log("starting drizzle studio → :4983");
+Bun.spawn(["bunx", "drizzle-kit", "studio", "--port", "4983", "--verbose"], {
+  env: process.env,
+  stdout: "inherit",
+  stderr: "inherit",
+});
+
 // start caddy with the dev config
 const caddyfile = process.env.NODE_ENV === "production"
   ? "infra/Caddyfile"
@@ -24,6 +32,8 @@ Bun.spawn(["caddy", "run", "--config", caddyfile], {
 });
 
 console.log(`\n🔥 upend running on :4000`);
-console.log(`   http://localhost:4000/claude/ui/ → chat with claude`);
-console.log(`   http://localhost:4000/api/       → api`);
-console.log(`   http://localhost:4000/            → api (default)\n`);
+console.log(`   http://localhost:4000/          → dashboard`);
+console.log(`   http://localhost:4000/api/      → api`);
+console.log(`   http://localhost:4000/claude/   → chat with claude`);
+console.log(`   http://localhost:4000/studio/   → drizzle studio`);
+console.log(`   http://localhost:4000/apps/     → live apps\n`);

@@ -348,14 +348,16 @@
 <div id="app"></div>
 
 <script>
-const API_BASE = window.location.port === '3002'
-  ? ''
-  : 'http://localhost:3002';
-const AUTH_BASE = window.location.port === '3001'
-  ? ''
-  : 'http://localhost:3001';
+// when embedded via dashboard (:4000), use relative paths through caddy
+// when accessed directly (:3002), talk to services directly
+const isCaddy = window.location.port === '4000';
+const API_BASE = isCaddy ? '/claude' : '';
+const AUTH_BASE = isCaddy ? '/api' : 'http://localhost:3001';
 
-let token = localStorage.getItem('upend_token');
+// accept token from parent frame (dashboard) or localStorage
+const urlToken = new URLSearchParams(window.location.search).get('token');
+let token = urlToken || localStorage.getItem('upend_token');
+if (urlToken) localStorage.setItem('upend_token', urlToken);
 let currentSessionId = null;
 let eventSource = null;
 let isRunning = false;

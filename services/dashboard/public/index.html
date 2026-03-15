@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>upend</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --border: #262626;
+      --text: #e5e5e5;
+      --muted: #737373;
+      --accent: #f97316;
+      --accent-dim: #431407;
+      --green: #22c55e;
+      --red: #ef4444;
+    }
+
+    body {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ---------- top bar ---------- */
+    .topbar {
+      height: 44px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      flex-shrink: 0;
+      z-index: 100;
+    }
+
+    .topbar .left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .topbar .logo {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+
+    .topbar .tabs {
+      display: flex;
+      gap: 2px;
+    }
+
+    .topbar .tab {
+      padding: 6px 14px;
+      font-size: 12px;
+      color: var(--muted);
+      background: none;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+
+    .topbar .tab:hover { color: var(--text); background: var(--border); }
+    .topbar .tab.active { color: var(--accent); background: var(--accent-dim); }
+
+    .topbar .right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .topbar .apps-dropdown {
+      position: relative;
+    }
+
+    .topbar .apps-menu {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      min-width: 200px;
+      padding: 4px;
+      z-index: 200;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    .topbar .apps-menu.open { display: block; }
+
+    .topbar .apps-menu a {
+      display: block;
+      padding: 8px 12px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+
+    .topbar .apps-menu a:hover { background: var(--border); }
+
+    .topbar .apps-menu .empty {
+      padding: 12px;
+      color: var(--muted);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .topbar .user-info {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .topbar .btn {
+      padding: 5px 12px;
+      font-size: 11px;
+      color: var(--muted);
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .topbar .btn:hover { color: var(--text); border-color: var(--muted); }
+
+    /* ---------- panels ---------- */
+    .panels {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+
+    .panel {
+      flex: 1;
+      display: none;
+      min-height: 0;
+    }
+
+    .panel.visible { display: flex; }
+
+    .panel iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    /* split view */
+    .panels.split .panel.visible {
+      flex: 1;
+    }
+
+    .panels.split .panel.visible + .panel.visible {
+      border-left: 1px solid var(--border);
+    }
+
+    .resizer {
+      width: 4px;
+      cursor: col-resize;
+      background: var(--border);
+      display: none;
+      flex-shrink: 0;
+    }
+
+    .panels.split .resizer { display: block; }
+    .resizer:hover { background: var(--accent); }
+
+    /* ---------- login overlay ---------- */
+    .login-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .login-overlay.hidden { display: none; }
+
+    .login-overlay form {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      width: 340px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .login-overlay h2 {
+      font-size: 16px;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+
+    .login-overlay input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .login-overlay input:focus { border-color: var(--accent); }
+
+    .login-overlay button[type="submit"] {
+      padding: 10px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .login-overlay .toggle {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .login-overlay .toggle:hover { color: var(--text); }
+    .login-overlay .error { color: var(--red); font-size: 12px; }
+  </style>
+</head>
+<body>
+
+<!-- login overlay -->
+<div class="login-overlay" id="login-overlay">
+  <form id="auth-form">
+    <h2 id="auth-title">log in</h2>
+    <input name="email" type="email" placeholder="email" autocomplete="email" required>
+    <input name="password" type="password" placeholder="password" autocomplete="current-password" required>
+    <div class="error" id="auth-error"></div>
+    <button type="submit" id="auth-submit">log in</button>
+    <div class="toggle" id="auth-toggle">need an account? sign up</div>
+  </form>
+</div>
+
+<!-- top bar -->
+<div class="topbar" id="topbar" style="display:none">
+  <div class="left">
+    <div class="logo">upend</div>
+    <div class="tabs">
+      <button class="tab active" data-panel="claude">claude</button>
+      <button class="tab" data-panel="studio">data</button>
+      <button class="tab" data-panel="split">split</button>
+    </div>
+  </div>
+  <div class="right">
+    <div class="apps-dropdown">
+      <button class="btn" id="apps-btn">apps</button>
+      <div class="apps-menu" id="apps-menu"></div>
+    </div>
+    <span class="user-info" id="user-info"></span>
+    <button class="btn" id="logout-btn">logout</button>
+  </div>
+</div>
+
+<!-- panels -->
+<div class="panels" id="panels" style="display:none">
+  <div class="panel visible" id="panel-claude">
+    <iframe id="iframe-claude"></iframe>
+  </div>
+  <div class="resizer" id="resizer"></div>
+  <div class="panel" id="panel-studio">
+    <iframe id="iframe-studio"></iframe>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+const CLAUDE_URL = '/claude/ui/';
+const STUDIO_URL = 'https://local.drizzle.studio';
+
+let token = localStorage.getItem('upend_token');
+let userEmail = localStorage.getItem('upend_email');
+let isSignup = false;
+
+// ---------- auth ----------
+
+function checkAuth() {
+  if (token) {
+    document.getElementById('login-overlay').classList.add('hidden');
+    document.getElementById('topbar').style.display = '';
+    document.getElementById('panels').style.display = '';
+    document.getElementById('user-info').textContent = userEmail || '';
+    loadIframes();
+    loadApps();
+  }
+}
+
+document.getElementById('auth-toggle').onclick = () => {
+  isSignup = !isSignup;
+  document.getElementById('auth-title').textContent = isSignup ? 'sign up' : 'log in';
+  document.getElementById('auth-submit').textContent = isSignup ? 'sign up' : 'log in';
+  document.getElementById('auth-toggle').textContent = isSignup
+    ? 'already have an account? log in'
+    : 'need an account? sign up';
+};
+
+document.getElementById('auth-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const form = new FormData(e.target);
+  const endpoint = isSignup ? '/auth/signup' : '/auth/login';
+  try {
+    const res = await fetch(API + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: form.get('email'),
+        password: form.get('password'),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    token = data.token;
+    userEmail = data.user.email;
+    localStorage.setItem('upend_token', token);
+    localStorage.setItem('upend_email', userEmail);
+    checkAuth();
+  } catch (err) {
+    document.getElementById('auth-error').textContent = err.message;
+  }
+};
+
+document.getElementById('logout-btn').onclick = () => {
+  token = null;
+  userEmail = null;
+  localStorage.removeItem('upend_token');
+  localStorage.removeItem('upend_email');
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('topbar').style.display = 'none';
+  document.getElementById('panels').style.display = 'none';
+};
+
+// ---------- iframes ----------
+
+let iframesLoaded = false;
+
+function loadIframes() {
+  if (iframesLoaded) return;
+  iframesLoaded = true;
+
+  // pass token to claude UI via URL param so it can auto-login
+  const claudeUrl = CLAUDE_URL + '?token=' + encodeURIComponent(token);
+  document.getElementById('iframe-claude').src = claudeUrl;
+  document.getElementById('iframe-studio').src = STUDIO_URL;
+}
+
+// ---------- tabs ----------
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+
+    const panel = tab.dataset.panel;
+
+    const panels = document.getElementById('panels');
+    const claudePanel = document.getElementById('panel-claude');
+    const studioPanel = document.getElementById('panel-studio');
+
+    panels.classList.remove('split');
+
+    if (panel === 'claude') {
+      claudePanel.classList.add('visible');
+      studioPanel.classList.remove('visible');
+    } else if (panel === 'studio') {
+      claudePanel.classList.remove('visible');
+      studioPanel.classList.add('visible');
+    } else if (panel === 'split') {
+      panels.classList.add('split');
+      claudePanel.classList.add('visible');
+      studioPanel.classList.add('visible');
+    }
+  });
+});
+
+// ---------- resizer ----------
+
+const resizer = document.getElementById('resizer');
+let isResizing = false;
+
+resizer.addEventListener('mousedown', (e) => {
+  isResizing = true;
+  document.body.style.cursor = 'col-resize';
+  // disable pointer events on iframes while resizing
+  document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = 'none');
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isResizing) return;
+  const panels = document.getElementById('panels');
+  const rect = panels.getBoundingClientRect();
+  const pct = ((e.clientX - rect.left) / rect.width) * 100;
+  const clamped = Math.max(20, Math.min(80, pct));
+  document.getElementById('panel-claude').style.flex = `0 0 ${clamped}%`;
+  document.getElementById('panel-studio').style.flex = `0 0 ${100 - clamped}%`;
+});
+
+document.addEventListener('mouseup', () => {
+  if (!isResizing) return;
+  isResizing = false;
+  document.body.style.cursor = '';
+  document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = '');
+});
+
+// ---------- apps dropdown ----------
+
+document.getElementById('apps-btn').onclick = () => {
+  document.getElementById('apps-menu').classList.toggle('open');
+  loadApps();
+};
+
+// close dropdown on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.apps-dropdown')) {
+    document.getElementById('apps-menu').classList.remove('open');
+  }
+});
+
+async function loadApps() {
+  try {
+    const res = await fetch('/claude/apps', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    const apps = await res.json();
+    const menu = document.getElementById('apps-menu');
+
+    if (!apps.length) {
+      menu.innerHTML = '<div class="empty">no apps yet — tell claude to build one</div>';
+      return;
+    }
+
+    menu.innerHTML = apps.map(app =>
+      `<a href="/apps/${app.name}/" target="_blank">${app.name}</a>`
+    ).join('');
+  } catch {
+    document.getElementById('apps-menu').innerHTML =
+      '<div class="empty">failed to load apps</div>';
+  }
+}
+
+// ---------- init ----------
+
+checkAuth();
+</script>
+</body>
+</html>

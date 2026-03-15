@@ -1,0 +1,27 @@
+{
+  "name": "upend",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "dotenvx run -- bun --watch index.ts",
+    "dev:api": "dotenvx run -- bun --watch services/api/index.ts",
+    "dev:claude": "dotenvx run -- bun --watch services/claude/index.ts",
+    "start": "dotenvx run -- bun index.ts",
+    "migrate": "dotenvx run -- bun src/migrate.ts",
+    "deploy": "./deploy.sh",
+    "new-service": "./new-service.sh"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@dotenvx/dotenvx": "^1.55.1",
+    "hono": "^4.12.8",
+    "jose": "^6.2.1",
+    "postgres": "^3.4.8"
+  }
+}

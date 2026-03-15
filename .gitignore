@@ -1,0 +1,36 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenvx — .env.keys holds decryption keys, NEVER deploy or commit
+.env.keys
+
+# JWT signing keys
+.keys
+
+# upend snapshots (rollback backups, stay on the server)
+.snapshots
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store

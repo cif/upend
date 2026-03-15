@@ -1,0 +1,17 @@
+# Replace with your domain or use :80 for IP-only access
+{$UPEND_DOMAIN:localhost} {
+  # API service
+  handle /api/* {
+    reverse_proxy localhost:3001
+  }
+
+  # Claude editing service
+  handle /claude/* {
+    reverse_proxy localhost:3002
+  }
+
+  # Default → API
+  handle {
+    reverse_proxy localhost:3001
+  }
+}

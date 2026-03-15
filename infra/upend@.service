@@ -1,0 +1,17 @@
+# systemd template unit — one instance per service
+# Usage: systemctl enable upend@api upend@claude
+[Unit]
+Description=upend %i service
+After=network.target
+
+[Service]
+Type=simple
+User=upend
+WorkingDirectory=/opt/upend
+ExecStart=/usr/local/bin/dotenvx run -- /usr/local/bin/bun services/%i/index.ts
+Restart=always
+RestartSec=2
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

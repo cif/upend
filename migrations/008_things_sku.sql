@@ -1,0 +1,1 @@
+ALTER TABLE things ADD COLUMN sku TEXT;

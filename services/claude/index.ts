@@ -231,7 +231,9 @@ async function runMessage(
       "--dangerously-skip-permissions",
     ];
     if (isResume) {
-      args.push("--resume", "--session-id", claudeSessionId);
+      args.push("--resume", claudeSessionId);
+    } else {
+      args.push("--session-id", claudeSessionId);
     }
 
     console.log(`[claude:${sessionId}] spawning: ${args.join(" ")}`);
@@ -303,7 +305,18 @@ async function runMessage(
     console.log(`[claude:${sessionId}] exited code ${exitCode}, ${fullOutput.length} bytes`);
 
     if (exitCode !== 0) {
-      const errMsg = `exit code ${exitCode}: ${resultText || fullOutput.slice(0, 500)}`;
+      // parse error from stream-json if possible
+      let errorDetail = resultText || fullOutput;
+      try {
+        for (const line of fullOutput.split("\n").filter(Boolean)) {
+          const evt = JSON.parse(line);
+          if (evt.type === "result" && evt.is_error) {
+            errorDetail = evt.error || evt.subtype || `${evt.subtype} (session: ${evt.session_id})`;
+          }
+        }
+      } catch {}
+      const errMsg = `claude error: ${errorDetail}`;
+      console.error(`[claude:${sessionId}] FULL OUTPUT:\n${fullOutput}`);
       console.error(`[claude:${sessionId}] ERROR: ${errMsg}`);
       await sql`UPDATE session_messages SET status = 'error', result = ${errMsg} WHERE id = ${messageId}`;
       broadcast(sessionId, { type: "status", status: "error", error: errMsg, messageId });

@@ -358,7 +358,7 @@ const AUTH_BASE = isCaddy ? '/api' : 'http://localhost:3001';
 const urlToken = new URLSearchParams(window.location.search).get('token');
 let token = urlToken || localStorage.getItem('upend_token');
 if (urlToken) localStorage.setItem('upend_token', urlToken);
-let currentSessionId = null;
+let currentSessionId = localStorage.getItem('upend_session') ? Number(localStorage.getItem('upend_session')) : null;
 let isRunning = false;
 
 function render() {
@@ -460,6 +460,8 @@ function renderChat() {
 
   document.getElementById('new-session-btn').onclick = () => {
     currentSessionId = null;
+    localStorage.removeItem('upend_session');
+    if (ws) { ws.close(); ws = null; }
     document.getElementById('messages').innerHTML = '';
     document.getElementById('snapshot-banner').innerHTML = '';
     document.getElementById('sidebar').classList.remove('open');
@@ -506,6 +508,11 @@ function renderChat() {
   };
 
   loadSessions();
+
+  // restore session from localStorage on refresh
+  if (currentSessionId) {
+    openSession(currentSessionId);
+  }
 }
 
 async function createSession(prompt, force = false) {
@@ -541,7 +548,8 @@ async function createSession(prompt, force = false) {
 
     if (!res.ok) throw new Error(data.error);
 
-    currentSessionId = data.session.id;
+    currentSessionId = Number(data.session.id);
+    localStorage.setItem('upend_session', currentSessionId);
 
     document.getElementById('snapshot-banner').innerHTML = `
       <div class="snapshot-banner">
@@ -553,7 +561,7 @@ async function createSession(prompt, force = false) {
     connectWS(currentSessionId);
     loadSessions();
   } catch (err) {
-    addMessage('system', `error: ${err.message}`);
+    addMessage('system', `failed to create session: ${err.message}\n\ntry again or check the server logs.`);
     setStatus('error', 'failed');
   }
 }
@@ -569,7 +577,7 @@ async function sendMessage(prompt) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
   } catch (err) {
-    addMessage('system', `error: ${err.message}`);
+    addMessage('system', `failed to send message: ${err.message}\n\nyou can:\n  • try sending again\n  • start a new session if this one is broken`);
     setStatus('error', 'failed');
   }
 }
@@ -649,8 +657,10 @@ function connectWS(sessionId) {
         window.parent?.postMessage({ type: 'upend:turn-complete' }, '*');
       } else if (data.status === 'error') {
         isRunning = false;
+        assistantContent = '';
+        assistantEl = null;
         setStatus('error', 'error');
-        addMessage('system', `error: ${data.error}`);
+        addMessage('system', `claude hit an error: ${data.error || 'unknown'}\n\nyou can:\n  • send another message to retry\n  • start a new session\n  • check the server logs for details`);
       } else if (data.status === 'running') {
         // new message started, reset
         assistantContent = '';
@@ -726,40 +736,67 @@ async function loadSessions() {
 }
 
 window.openSession = async (id) => {
-  currentSessionId = id;
-  document.getElementById('sidebar').classList.remove('open');
+  try {
+    document.getElementById('sidebar').classList.remove('open');
 
-  const res = await fetch(API_BASE + `/sessions/${id}`, { headers: headers() });
-  const session = await res.json();
+    const res = await fetch(API_BASE + `/sessions/${id}`, { headers: headers() });
+    if (!res.ok) throw new Error(`session ${id} not found or inaccessible`);
 
-  const msgs = document.getElementById('messages');
-  msgs.innerHTML = '';
+    const session = await res.json();
+    if (session.error) throw new Error(session.error);
 
-  if (session.snapshotName) {
-    document.getElementById('snapshot-banner').innerHTML = `
-      <div class="snapshot-banner">
-        <span>snapshot: ${session.snapshotName}</span>
-        <button onclick="rollback('${session.snapshotName}')">rollback</button>
-      </div>
-    `;
-  }
+    currentSessionId = Number(id);
+    localStorage.setItem('upend_session', currentSessionId);
 
-  // render existing messages
-  if (session.messages) {
-    for (const msg of session.messages) {
-      addMessage(msg.role, msg.content);
-      if (msg.result && msg.role === 'user') {
-        addMessage('assistant', msg.result.slice(0, 2000));
+    const msgs = document.getElementById('messages');
+    msgs.innerHTML = '';
+    document.getElementById('snapshot-banner').innerHTML = '';
+
+    if (session.snapshotName) {
+      document.getElementById('snapshot-banner').innerHTML = `
+        <div class="snapshot-banner">
+          <span>snapshot: ${session.snapshotName}</span>
+          <button onclick="rollback('${session.snapshotName}')">rollback</button>
+        </div>
+      `;
+    }
+
+    // render existing messages
+    if (session.messages) {
+      for (const msg of session.messages) {
+        addMessage(msg.role, msg.content);
+        if (msg.result && msg.role === 'user') {
+          if (msg.status === 'error') {
+            addMessage('system', `error: ${msg.result}`);
+          } else {
+            addMessage('assistant', msg.result);
+          }
+        }
       }
     }
-  }
 
-  // reconnect SSE if session is active
-  if (session.status === 'active') {
-    connectWS(id);
-  }
+    // connect WS if session is active
+    if (session.status === 'active') {
+      connectWS(id);
+      setStatus('active', 'connected');
+    } else {
+      setStatus('active', session.status);
+    }
 
-  loadSessions();
+    loadSessions();
+  } catch (err) {
+    console.error('[openSession] failed:', err);
+    // reset to clean state
+    currentSessionId = null;
+    localStorage.removeItem('upend_session');
+    const msgs = document.getElementById('messages');
+    if (msgs) {
+      msgs.innerHTML = '';
+      addMessage('system', `could not load session ${id}: ${err.message}\n\nstart a new session to continue.`);
+    }
+    setStatus('active', 'ready');
+    loadSessions();
+  }
 };
 
 window.rollback = async (snapName) => {

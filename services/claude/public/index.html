@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>upend — claude</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --border: #262626;
+      --text: #e5e5e5;
+      --muted: #737373;
+      --accent: #f97316;
+      --accent-dim: #431407;
+      --green: #22c55e;
+      --red: #ef4444;
+      --blue: #3b82f6;
+    }
+
+    body {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    header .status {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    header .status .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    header .status .dot.active { background: var(--green); }
+    header .status .dot.running { background: var(--accent); animation: pulse 1s infinite; }
+    header .status .dot.error { background: var(--red); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .sidebar {
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 260px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      z-index: 10;
+      transform: translateX(-100%);
+      transition: transform 0.2s;
+    }
+
+    .sidebar.open { transform: translateX(0); }
+
+    .sidebar h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      padding: 16px 16px 8px;
+    }
+
+    .sidebar .session-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 8px;
+    }
+
+    .sidebar .session-item {
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+
+    .sidebar .session-item:hover { background: var(--border); color: var(--text); }
+    .sidebar .session-item.active { background: var(--accent-dim); color: var(--accent); }
+
+    .sidebar .new-session {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .sidebar .new-session button {
+      width: 100%;
+      padding: 8px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .message {
+      max-width: 800px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .message .role {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+
+    .message .role.user { color: var(--blue); }
+    .message .role.assistant { color: var(--accent); }
+    .message .role.system { color: var(--muted); }
+
+    .message .content {
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .message .tool-use {
+      margin: 8px 0;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .message .tool-use .tool-name {
+      color: var(--green);
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .message .tool-use pre {
+      margin-top: 4px;
+      color: var(--muted);
+      overflow-x: auto;
+    }
+
+    .input-area {
+      border-top: 1px solid var(--border);
+      padding: 16px 20px;
+      flex-shrink: 0;
+    }
+
+    .input-area form {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      gap: 8px;
+    }
+
+    .input-area textarea {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      resize: none;
+      min-height: 44px;
+      max-height: 200px;
+      outline: none;
+    }
+
+    .input-area textarea:focus { border-color: var(--accent); }
+
+    .input-area button {
+      padding: 10px 20px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .input-area button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .input-area .hint {
+      max-width: 800px;
+      margin: 8px auto 0;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .login-screen {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .login-screen form {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      width: 340px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .login-screen h2 {
+      font-size: 16px;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+
+    .login-screen input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .login-screen input:focus { border-color: var(--accent); }
+
+    .login-screen button {
+      padding: 10px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .login-screen .error {
+      color: var(--red);
+      font-size: 12px;
+    }
+
+    .login-screen .toggle {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .login-screen .toggle:hover { color: var(--text); }
+
+    .snapshot-banner {
+      padding: 8px 20px;
+      background: var(--accent-dim);
+      font-size: 11px;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .snapshot-banner button {
+      background: none;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .hamburger {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 18px;
+      padding: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script>
+const API_BASE = window.location.port === '3002'
+  ? ''
+  : 'http://localhost:3002';
+const AUTH_BASE = window.location.port === '3001'
+  ? ''
+  : 'http://localhost:3001';
+
+let token = localStorage.getItem('upend_token');
+let currentSessionId = null;
+let eventSource = null;
+let isRunning = false;
+
+function render() {
+  if (!token) {
+    renderLogin();
+  } else {
+    renderChat();
+  }
+}
+
+function renderLogin() {
+  const isSignup = window._isSignup || false;
+  document.getElementById('app').innerHTML = `
+    <header>
+      <h1>upend</h1>
+    </header>
+    <div class="login-screen">
+      <form id="auth-form">
+        <h2>${isSignup ? 'sign up' : 'log in'}</h2>
+        ${isSignup ? '<input name="name" placeholder="name" autocomplete="name">' : ''}
+        <input name="email" type="email" placeholder="email" autocomplete="email" required>
+        <input name="password" type="password" placeholder="password" autocomplete="current-password" required>
+        <div class="error" id="auth-error"></div>
+        <button type="submit">${isSignup ? 'sign up' : 'log in'}</button>
+        <div class="toggle" id="auth-toggle">${isSignup ? 'already have an account? log in' : 'need an account? sign up'}</div>
+      </form>
+    </div>
+  `;
+
+  document.getElementById('auth-toggle').onclick = () => {
+    window._isSignup = !isSignup;
+    render();
+  };
+
+  document.getElementById('auth-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const form = new FormData(e.target);
+    const endpoint = isSignup ? '/auth/signup' : '/auth/login';
+    try {
+      const res = await fetch(AUTH_BASE + endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: form.get('email'),
+          password: form.get('password'),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      token = data.token;
+      localStorage.setItem('upend_token', token);
+      render();
+    } catch (err) {
+      document.getElementById('auth-error').textContent = err.message;
+    }
+  };
+}
+
+function renderChat() {
+  document.getElementById('app').innerHTML = `
+    <div class="sidebar" id="sidebar">
+      <h2>sessions</h2>
+      <div class="session-list" id="session-list"></div>
+      <div class="new-session">
+        <button id="new-session-btn">+ new session</button>
+      </div>
+    </div>
+    <div class="main">
+      <header>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="hamburger" id="sidebar-toggle">☰</button>
+          <h1>upend</h1>
+        </div>
+        <div class="status">
+          <span id="status-text">ready</span>
+          <span class="dot" id="status-dot"></span>
+        </div>
+      </header>
+      <div id="snapshot-banner"></div>
+      <div class="messages" id="messages">
+        <div class="message">
+          <div class="role system">system</div>
+          <div class="content">start a new session or pick one from the sidebar. claude has full access to the codebase — edits go live.</div>
+        </div>
+      </div>
+      <div class="input-area">
+        <form id="chat-form">
+          <textarea id="chat-input" placeholder="tell claude what to do..." rows="1"></textarea>
+          <button type="submit" id="send-btn">send</button>
+        </form>
+        <div class="hint">shift+enter for newline — claude can edit files, run commands, and restart services</div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('sidebar-toggle').onclick = () => {
+    document.getElementById('sidebar').classList.toggle('open');
+  };
+
+  document.getElementById('new-session-btn').onclick = () => {
+    currentSessionId = null;
+    document.getElementById('messages').innerHTML = '';
+    document.getElementById('snapshot-banner').innerHTML = '';
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('chat-input').focus();
+  };
+
+  const textarea = document.getElementById('chat-input');
+  textarea.addEventListener('input', () => {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+  });
+
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('chat-form').requestSubmit();
+    }
+  });
+
+  document.getElementById('chat-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('chat-input');
+    const prompt = input.value.trim();
+    if (!prompt || isRunning) return;
+
+    input.value = '';
+    input.style.height = 'auto';
+    addMessage('user', prompt);
+
+    if (!currentSessionId) {
+      await createSession(prompt);
+    } else {
+      await sendMessage(prompt);
+    }
+  };
+
+  loadSessions();
+}
+
+async function createSession(prompt) {
+  setStatus('running', 'creating session...');
+  try {
+    const res = await fetch(API_BASE + '/sessions', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ prompt }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    currentSessionId = data.session.id;
+
+    document.getElementById('snapshot-banner').innerHTML = `
+      <div class="snapshot-banner">
+        <span>snapshot: ${data.snapshot}</span>
+        <button onclick="rollback('${data.snapshot}')">rollback</button>
+      </div>
+    `;
+
+    connectSSE(currentSessionId);
+    loadSessions();
+  } catch (err) {
+    addMessage('system', `error: ${err.message}`);
+    setStatus('error', 'failed');
+  }
+}
+
+async function sendMessage(prompt) {
+  setStatus('running', 'sending...');
+  try {
+    const res = await fetch(API_BASE + `/sessions/${currentSessionId}/messages`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ prompt }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+  } catch (err) {
+    addMessage('system', `error: ${err.message}`);
+    setStatus('error', 'failed');
+  }
+}
+
+function connectSSE(sessionId) {
+  if (eventSource) eventSource.close();
+
+  eventSource = new EventSource(API_BASE + `/sessions/${sessionId}/stream`);
+  isRunning = true;
+  setStatus('running', 'claude is working...');
+
+  let assistantContent = '';
+  let assistantEl = null;
+
+  eventSource.addEventListener('update', (e) => {
+    const data = JSON.parse(e.data);
+
+    if (data.type === 'status') {
+      if (data.status === 'complete') {
+        isRunning = false;
+        setStatus('active', 'done');
+      } else if (data.status === 'error') {
+        isRunning = false;
+        setStatus('error', 'error');
+        addMessage('system', `error: ${data.error}`);
+      } else if (data.status === 'running') {
+        setStatus('running', 'claude is working...');
+      }
+      return;
+    }
+
+    if (data.type === 'chunk' && data.raw) {
+      try {
+        const event = JSON.parse(data.raw);
+
+        // handle different stream-json event types
+        if (event.type === 'assistant' && event.message?.content) {
+          for (const block of event.message.content) {
+            if (block.type === 'text') {
+              if (!assistantEl) {
+                assistantEl = addMessage('assistant', '');
+              }
+              assistantContent += block.text;
+              assistantEl.querySelector('.content').textContent = assistantContent;
+              scrollToBottom();
+            } else if (block.type === 'tool_use') {
+              addToolUse(block.name, block.input);
+            }
+          }
+        } else if (event.type === 'content_block_delta') {
+          if (event.delta?.type === 'text_delta') {
+            if (!assistantEl) {
+              assistantEl = addMessage('assistant', '');
+            }
+            assistantContent += event.delta.text;
+            assistantEl.querySelector('.content').textContent = assistantContent;
+            scrollToBottom();
+          }
+        } else if (event.type === 'result') {
+          // final result — reset for next message
+          assistantContent = '';
+          assistantEl = null;
+          isRunning = false;
+          setStatus('active', 'done');
+        }
+      } catch {
+        // non-JSON chunk, show raw
+        if (!assistantEl) {
+          assistantEl = addMessage('assistant', '');
+        }
+        assistantContent += data.raw + '\n';
+        assistantEl.querySelector('.content').textContent = assistantContent;
+        scrollToBottom();
+      }
+    }
+  });
+
+  eventSource.onerror = () => {
+    isRunning = false;
+    setStatus('error', 'stream disconnected');
+  };
+}
+
+function addMessage(role, content) {
+  const el = document.createElement('div');
+  el.className = 'message';
+  el.innerHTML = `
+    <div class="role ${role}">${role}</div>
+    <div class="content">${escapeHtml(content)}</div>
+  `;
+  document.getElementById('messages').appendChild(el);
+  scrollToBottom();
+  return el;
+}
+
+function addToolUse(name, input) {
+  const el = document.createElement('div');
+  el.className = 'message';
+  el.innerHTML = `
+    <div class="tool-use">
+      <div class="tool-name">▶ ${escapeHtml(name)}</div>
+      <pre>${escapeHtml(typeof input === 'string' ? input : JSON.stringify(input, null, 2))}</pre>
+    </div>
+  `;
+  document.getElementById('messages').appendChild(el);
+  scrollToBottom();
+}
+
+function scrollToBottom() {
+  const msgs = document.getElementById('messages');
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function setStatus(state, text) {
+  const dot = document.getElementById('status-dot');
+  const label = document.getElementById('status-text');
+  if (dot) dot.className = `dot ${state}`;
+  if (label) label.textContent = text;
+}
+
+async function loadSessions() {
+  try {
+    const res = await fetch(API_BASE + '/sessions', { headers: headers() });
+    const sessions = await res.json();
+    const list = document.getElementById('session-list');
+    if (!list) return;
+    list.innerHTML = sessions.map(s => `
+      <div class="session-item ${s.id == currentSessionId ? 'active' : ''}"
+           onclick="openSession(${s.id})">
+        ${escapeHtml(s.prompt.slice(0, 60))}
+      </div>
+    `).join('');
+  } catch {}
+}
+
+window.openSession = async (id) => {
+  currentSessionId = id;
+  document.getElementById('sidebar').classList.remove('open');
+
+  const res = await fetch(API_BASE + `/sessions/${id}`, { headers: headers() });
+  const session = await res.json();
+
+  const msgs = document.getElementById('messages');
+  msgs.innerHTML = '';
+
+  if (session.snapshotName) {
+    document.getElementById('snapshot-banner').innerHTML = `
+      <div class="snapshot-banner">
+        <span>snapshot: ${session.snapshotName}</span>
+        <button onclick="rollback('${session.snapshotName}')">rollback</button>
+      </div>
+    `;
+  }
+
+  // render existing messages
+  if (session.messages) {
+    for (const msg of session.messages) {
+      addMessage(msg.role, msg.content);
+      if (msg.result && msg.role === 'user') {
+        addMessage('assistant', msg.result.slice(0, 2000));
+      }
+    }
+  }
+
+  // reconnect SSE if session is active
+  if (session.status === 'active') {
+    connectSSE(id);
+  }
+
+  loadSessions();
+};
+
+window.rollback = async (snapName) => {
+  if (!confirm(`rollback to ${snapName}? this will restore files and database.`)) return;
+
+  const res = await fetch(API_BASE + '/rollback', {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ snapshot: snapName }),
+  });
+  const data = await res.json();
+  addMessage('system', `rolled back to ${snapName}. safety snapshot: ${data.safetySnapshot}`);
+};
+
+function headers() {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  };
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+render();
+</script>
+</body>
+</html>

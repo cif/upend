@@ -1,11 +1,18 @@
 import { Hono } from "hono";
 import { logger } from "hono/logger";
+import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
+import { cors } from "hono/cors";
 import { sql } from "../../lib/db";
 import { snapshot, listSnapshots, restoreSnapshot } from "./snapshots";
 
 const app = new Hono();
 app.use("*", logger());
+app.use("*", cors());
+
+// serve the chat UI
+app.use("/ui/*", serveStatic({ root: "./services/claude/public", rewriteRequestPath: (p) => p.replace("/ui", "") }));
+app.get("/", (c) => c.redirect("/ui/"));
 
 const PROJECT_ROOT = process.env.UPEND_ROOT || process.cwd();
 

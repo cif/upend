@@ -4,7 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "dotenvx run -- bun --watch index.ts",
+    "dev": "dotenvx run -- bun index.ts",
+    "dev:proxy": "caddy run --config infra/Caddyfile.dev",
     "dev:api": "dotenvx run -- bun --watch services/api/index.ts",
     "dev:claude": "dotenvx run -- bun --watch services/claude/index.ts",
     "start": "dotenvx run -- bun index.ts",

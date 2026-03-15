@@ -1,0 +1,21 @@
+:4000 {
+	# API service — strip /api prefix
+	handle_path /api/* {
+		reverse_proxy localhost:3001
+	}
+
+	# Claude editing service + chat UI — strip /claude prefix
+	handle_path /claude/* {
+		reverse_proxy localhost:3002
+	}
+
+	# JWKS (needs to be accessible at root)
+	handle /.well-known/* {
+		reverse_proxy localhost:3001
+	}
+
+	# Default → API
+	handle {
+		reverse_proxy localhost:3001
+	}
+}

@@ -359,7 +359,6 @@ const urlToken = new URLSearchParams(window.location.search).get('token');
 let token = urlToken || localStorage.getItem('upend_token');
 if (urlToken) localStorage.setItem('upend_token', urlToken);
 let currentSessionId = null;
-let eventSource = null;
 let isRunning = false;
 
 function render() {
@@ -422,10 +421,10 @@ function renderChat() {
   document.getElementById('app').innerHTML = `
     <div class="sidebar" id="sidebar">
       <h2>sessions</h2>
-      <div class="session-list" id="session-list"></div>
-      <div class="new-session">
+      <div class="new-session" style="padding:8px 16px 4px">
         <button id="new-session-btn">+ new session</button>
       </div>
+      <div class="session-list" id="session-list"></div>
     </div>
     <div class="main">
       <header>
@@ -551,7 +550,7 @@ async function createSession(prompt, force = false) {
       </div>
     `;
 
-    connectSSE(currentSessionId);
+    connectWS(currentSessionId);
     loadSessions();
   } catch (err) {
     addMessage('system', `error: ${err.message}`);
@@ -575,82 +574,100 @@ async function sendMessage(prompt) {
   }
 }
 
-function connectSSE(sessionId) {
-  if (eventSource) eventSource.close();
+let ws = null;
+let assistantContent = '';
+let assistantEl = null;
 
-  eventSource = new EventSource(API_BASE + `/sessions/${sessionId}/stream`);
+function connectWS(sessionId) {
+  if (ws) { ws.close(); ws = null; }
+
+  // figure out ws url — through caddy or direct
+  const wsBase = isCaddy
+    ? `ws://${window.location.host}/claude`
+    : `ws://localhost:3002`;
+  const wsUrl = `${wsBase}/ws/${sessionId}?token=${encodeURIComponent(token)}`;
+
+  console.log('[ws] connecting:', wsUrl);
+  ws = new WebSocket(wsUrl);
   isRunning = true;
-  setStatus('running', 'claude is working...');
+  setStatus('running', 'connected');
 
-  let assistantContent = '';
-  let assistantEl = null;
+  // reset streaming state
+  assistantContent = '';
+  assistantEl = null;
 
-  eventSource.addEventListener('update', (e) => {
+  ws.onopen = () => {
+    console.log('[ws] connected');
+
+    // fetch current session state (catch up if we missed anything)
+    fetch(API_BASE + `/sessions/${sessionId}`, { headers: headers() })
+      .then(r => r.json())
+      .then(session => {
+        if (!session.messages) return;
+        for (const msg of session.messages) {
+          if (msg.status === 'complete' && msg.result && msg.role === 'user') {
+            // check if we already rendered this
+            if (!assistantEl) {
+              addMessage('assistant', msg.result);
+            }
+          }
+        }
+        // check if latest message is already done
+        const latest = session.messages[session.messages.length - 1];
+        if (latest?.status === 'complete') {
+          isRunning = false;
+          setStatus('active', 'done');
+        }
+      })
+      .catch(() => {});
+  };
+
+  ws.onmessage = (e) => {
     const data = JSON.parse(e.data);
+    console.log('[ws] msg:', data.type);
 
-    if (data.type === 'status') {
+    if (data.type === 'text') {
+      if (!assistantEl) {
+        assistantEl = addMessage('assistant', '');
+      }
+      assistantContent += data.text;
+      assistantEl.querySelector('.content').textContent = assistantContent;
+      scrollToBottom();
+    }
+
+    else if (data.type === 'tool_use') {
+      addToolUse(data.name, data.input);
+    }
+
+    else if (data.type === 'status') {
       if (data.status === 'complete') {
+        // reset for next message
+        assistantContent = '';
+        assistantEl = null;
         isRunning = false;
         setStatus('active', 'done');
+        window.parent?.postMessage({ type: 'upend:turn-complete' }, '*');
       } else if (data.status === 'error') {
         isRunning = false;
         setStatus('error', 'error');
         addMessage('system', `error: ${data.error}`);
       } else if (data.status === 'running') {
+        // new message started, reset
+        assistantContent = '';
+        assistantEl = null;
+        isRunning = true;
         setStatus('running', 'claude is working...');
       }
-      return;
     }
+  };
 
-    if (data.type === 'chunk' && data.raw) {
-      try {
-        const event = JSON.parse(data.raw);
+  ws.onclose = () => {
+    console.log('[ws] disconnected');
+    if (isRunning) setStatus('error', 'disconnected');
+  };
 
-        // handle different stream-json event types
-        if (event.type === 'assistant' && event.message?.content) {
-          for (const block of event.message.content) {
-            if (block.type === 'text') {
-              if (!assistantEl) {
-                assistantEl = addMessage('assistant', '');
-              }
-              assistantContent += block.text;
-              assistantEl.querySelector('.content').textContent = assistantContent;
-              scrollToBottom();
-            } else if (block.type === 'tool_use') {
-              addToolUse(block.name, block.input);
-            }
-          }
-        } else if (event.type === 'content_block_delta') {
-          if (event.delta?.type === 'text_delta') {
-            if (!assistantEl) {
-              assistantEl = addMessage('assistant', '');
-            }
-            assistantContent += event.delta.text;
-            assistantEl.querySelector('.content').textContent = assistantContent;
-            scrollToBottom();
-          }
-        } else if (event.type === 'result') {
-          // final result — reset for next message
-          assistantContent = '';
-          assistantEl = null;
-          isRunning = false;
-          setStatus('active', 'done');
-        }
-      } catch {
-        // non-JSON chunk, show raw
-        if (!assistantEl) {
-          assistantEl = addMessage('assistant', '');
-        }
-        assistantContent += data.raw + '\n';
-        assistantEl.querySelector('.content').textContent = assistantContent;
-        scrollToBottom();
-      }
-    }
-  });
-
-  eventSource.onerror = () => {
-    isRunning = false;
-    setStatus('error', 'stream disconnected');
+  ws.onerror = (err) => {
+    console.error('[ws] error:', err);
   };
 }
 
@@ -697,12 +714,14 @@ async function loadSessions() {
     const sessions = await res.json();
     const list = document.getElementById('session-list');
     if (!list) return;
-    list.innerHTML = sessions.map(s => `
-      <div class="session-item ${s.id == currentSessionId ? 'active' : ''}"
-           onclick="openSession(${s.id})">
-        ${escapeHtml(s.prompt.slice(0, 60))}
-      </div>
-    `).join('');
+    list.innerHTML = sessions
+      .filter(s => s.status === 'active')
+      .map(s => `
+        <div class="session-item ${s.id == currentSessionId ? 'active' : ''}"
+             onclick="openSession(${s.id})">
+          ${escapeHtml(s.prompt.slice(0, 60))}
+        </div>
+      `).join('') || '<div style="padding:12px;color:var(--muted);font-size:11px">no active sessions</div>';
   } catch {}
 }
 
@@ -737,7 +756,7 @@ window.openSession = async (id) => {
 
   // reconnect SSE if session is active
   if (session.status === 'active') {
-    connectSSE(id);
+    connectWS(id);
   }
 
   loadSessions();

@@ -13,6 +13,7 @@ authRoutes.get("/.well-known/jwks.json", async (c) => {
 // signup
 authRoutes.post("/auth/signup", async (c) => {
   const { email, password, role } = await c.req.json();
+  console.log(`[auth] signup attempt: ${email}`);
   if (!email || !password) return c.json({ error: "email and password required" }, 400);
 
   const passwordHash = await Bun.password.hash(password, { algorithm: "argon2id" });
@@ -35,6 +36,7 @@ authRoutes.post("/auth/signup", async (c) => {
 // login
 authRoutes.post("/auth/login", async (c) => {
   const { email, password } = await c.req.json();
+  console.log(`[auth] login attempt: ${email}`);
   if (!email || !password) return c.json({ error: "email and password required" }, 400);
 
   const [user] = await sql`SELECT * FROM users WHERE email = ${email}`;

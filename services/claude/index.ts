@@ -4,15 +4,19 @@ import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
 import { cors } from "hono/cors";
 import { sql } from "../../lib/db";
+import { requireAuth } from "../../lib/middleware";
 import { snapshot, listSnapshots, restoreSnapshot } from "./snapshots";
 
 const app = new Hono();
 app.use("*", logger());
 app.use("*", cors());
 
-// serve the chat UI
+// serve the chat UI (public — auth happens client-side)
 app.use("/ui/*", serveStatic({ root: "./services/claude/public", rewriteRequestPath: (p) => p.replace("/ui", "") }));
 app.get("/", (c) => c.redirect("/ui/"));
+
+// everything else requires auth
+app.use("*", requireAuth);
 
 const PROJECT_ROOT = process.env.UPEND_ROOT || process.cwd();
 
@@ -20,8 +24,37 @@ const PROJECT_ROOT = process.env.UPEND_ROOT || process.cwd();
 
 // start a new session — snapshots everything, sends first message
 app.post("/sessions", async (c) => {
-  const { prompt } = await c.req.json();
+  const { prompt, force } = await c.req.json();
   if (!prompt) return c.json({ error: "prompt is required" }, 400);
+
+  const user = c.get("user") as { sub: string; email: string };
+
+  // check for active sessions
+  const activeSessions = await sql`
+    SELECT es.*,
+      (SELECT sm.content FROM session_messages sm WHERE sm.session_id = es.id ORDER BY sm.created_at DESC LIMIT 1) as last_message
+    FROM editing_sessions es
+    WHERE es.status = 'active'
+    ORDER BY es.created_at DESC
+  `;
+
+  if (activeSessions.length > 0 && !force) {
+    return c.json({
+      error: "active_sessions",
+      message: "There are active editing sessions. Creating a new session shares the same codebase — if anyone rolls back, ALL sessions are affected.",
+      activeSessions: activeSessions.map((s: any) => ({
+        id: s.id,
+        prompt: s.prompt,
+        snapshotName: s.snapshotName,
+        createdAt: s.createdAt,
+        lastMessage: s.lastMessage,
+      })),
+      options: {
+        force: 'Send { force: true } to create a new session anyway (takes a new snapshot)',
+        join: `Send a message to an existing session: POST /sessions/${activeSessions[0].id}/messages`,
+      },
+    }, 409);
+  }
 
   // snapshot files + db before anything happens
   const snap = await snapshot(PROJECT_ROOT);

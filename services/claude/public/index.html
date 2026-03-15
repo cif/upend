@@ -488,6 +488,15 @@ function renderChat() {
     input.style.height = 'auto';
     addMessage('user', prompt);
 
+    // handle !force to bypass presence warning
+    if (prompt === '!force' && window._pendingPrompt) {
+      const pending = window._pendingPrompt;
+      window._pendingPrompt = null;
+      addMessage('user', '!force');
+      await createSession(pending, true);
+      return;
+    }
+
     if (!currentSessionId) {
       await createSession(prompt);
     } else {
@@ -498,15 +507,37 @@ function renderChat() {
   loadSessions();
 }
 
-async function createSession(prompt) {
+async function createSession(prompt, force = false) {
   setStatus('running', 'creating session...');
   try {
     const res = await fetch(API_BASE + '/sessions', {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, force }),
     });
     const data = await res.json();
+
+    // presence warning — active sessions exist
+    if (res.status === 409 && data.error === 'active_sessions') {
+      const sessions = data.activeSessions;
+      const sessionList = sessions.map(s =>
+        `  #${s.id}: "${s.prompt.slice(0, 50)}..." (snapshot: ${s.snapshotName})`
+      ).join('\n');
+
+      addMessage('system',
+        `⚠ there are ${sessions.length} active session(s):\n${sessionList}\n\n` +
+        `creating a new session means you share the codebase. if anyone rolls back, ALL sessions are affected.\n\n` +
+        `options:\n` +
+        `  • type "!force" to create a new session anyway\n` +
+        `  • click a session in the sidebar to join an existing one`
+      );
+
+      // stash the prompt so !force can retry
+      window._pendingPrompt = prompt;
+      setStatus('active', 'waiting');
+      return;
+    }
+
     if (!res.ok) throw new Error(data.error);
 
     currentSessionId = data.session.id;

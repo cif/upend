@@ -1,4 +1,4 @@
-// upend entry point — starts all services + caddy + drizzle studio
+// upend entry point — starts all services + caddy + drizzle studio + ngrok
 
 const services = await Bun.file("infra/services.json").json() as Record<string, { entry: string; port: number; env: string }>;
 
@@ -31,9 +31,24 @@ Bun.spawn(["caddy", "run", "--config", caddyfile], {
   stderr: "inherit",
 });
 
+// start ngrok tunnel if domain is configured
+const ngrokDomain = process.env.NGROK_DOMAIN;
+if (ngrokDomain) {
+  console.log(`starting ngrok → ${ngrokDomain}`);
+  Bun.spawn(["ngrok", "http", "4000", "--url", ngrokDomain], {
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+}
+
 console.log(`\n🔥 upend running on :4000`);
 console.log(`   http://localhost:4000/          → dashboard`);
 console.log(`   http://localhost:4000/api/      → api`);
 console.log(`   http://localhost:4000/claude/   → chat with claude`);
 console.log(`   http://localhost:4000/studio/   → drizzle studio`);
-console.log(`   http://localhost:4000/apps/     → live apps\n`);
+console.log(`   http://localhost:4000/apps/     → live apps`);
+if (ngrokDomain) {
+  console.log(`   https://${ngrokDomain}/  → public tunnel`);
+  console.log(`   JWKS: https://${ngrokDomain}/.well-known/jwks.json`);
+}
+console.log();

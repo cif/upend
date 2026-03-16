@@ -82,7 +82,7 @@ app.post("/sessions", async (c) => {
     RETURNING *
   `;
 
-  runMessage(Number(session.id), Number(msg.id), prompt, claudeSessionId, false);
+  runMessage(Number(session.id), Number(msg.id), prompt, claudeSessionId, false, user);
 
   return c.json({ session, message: msg, snapshot: snap }, 201);
 });
@@ -107,7 +107,8 @@ app.post("/sessions/:id/messages", async (c) => {
     RETURNING *
   `;
 
-  runMessage(Number(sessionId), Number(msg.id), prompt, session.claudeSessionId, true);
+  const user = c.get("user") as { sub: string; email: string };
+  runMessage(Number(sessionId), Number(msg.id), prompt, session.claudeSessionId, true, user);
 
   return c.json(msg, 201);
 });
@@ -217,18 +218,22 @@ async function runMessage(
   messageId: number,
   prompt: string,
   claudeSessionId: string,
-  isResume: boolean
+  isResume: boolean,
+  user: { sub: string; email: string }
 ) {
   try {
     await sql`UPDATE session_messages SET status = 'running' WHERE id = ${messageId}`;
     broadcast(sessionId, { type: "status", status: "running", messageId });
-    console.log(`[claude:${sessionId}] message ${messageId} → running`);
+    console.log(`[claude:${sessionId}] message ${messageId} → running (user: ${user.email})`);
+
+    const userContext = `The current user is ${user.email} with id ${user.sub}. When inserting records that have an owner_id column, always set owner_id to '${user.sub}' so RLS policies work correctly.`;
 
     const args = [
       "claude", "-p", prompt,
       "--output-format", "stream-json",
       "--verbose",
       "--dangerously-skip-permissions",
+      "--append-system-prompt", userContext,
     ];
     if (isResume) {
       args.push("--resume", claudeSessionId);

@@ -345,20 +345,42 @@ async function loadApps() {
     const apps = await res.json();
     const menu = document.getElementById('apps-menu');
 
-    if (!apps.length) {
-      menu.innerHTML = '<div class="empty">no apps yet — tell claude to build one</div>';
-      return;
+    let html = '';
+
+    if (apps.length) {
+      html += apps.map(app =>
+        `<div class="item ${currentView === app.name ? 'active' : ''}" onclick="openApp('${app.name}')">
+          <span>${app.name}</span>
+          <a class="popout" href="/apps/${app.name}/" target="_blank" onclick="event.stopPropagation()" title="open in new tab">&#8599;</a>
+        </div>`
+      ).join('');
+    } else {
+      html += '<div class="empty">no apps yet</div>';
     }
 
-    menu.innerHTML = apps.map(app =>
-      `<div class="item ${currentView === app.name ? 'active' : ''}" onclick="openApp('${app.name}')">
-        <span>${app.name}</span>
-        <a class="popout" href="/apps/${app.name}/" target="_blank" onclick="event.stopPropagation()" title="open in new tab">&#8599;</a>
-      </div>`
-    ).join('');
+    html += '<div style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px">'
+      + '<div class="item" onclick="createNewApp()" style="color:var(--accent)">+ new app</div>'
+      + '</div>';
+
+    menu.innerHTML = html;
   } catch {
     document.getElementById('apps-menu').innerHTML = '<div class="empty">failed to load</div>';
   }
+}
+
+function createNewApp() {
+  document.getElementById('apps-menu').classList.remove('open');
+  const name = prompt('app name (lowercase, no spaces):');
+  if (!name) return;
+  const desc = prompt('what should this app do?');
+  if (!desc) return;
+
+  // send to claude via the chat iframe
+  const claudeIframe = document.getElementById('iframe-claude');
+  claudeIframe.contentWindow?.postMessage({
+    type: 'upend:send-prompt',
+    prompt: `create an app called "${name}" in apps/${name}/. ${desc}`,
+  }, '*');
 }
 
 // ---------- resizer ----------

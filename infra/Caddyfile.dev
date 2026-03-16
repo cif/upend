@@ -1,9 +1,9 @@
 :4000 {
 	# Neon Data API proxy — /api/data/* → PostgREST
 	handle_path /api/data/* {
+		rewrite * /neondb/rest/v1{uri}
 		reverse_proxy https://ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech {
 			header_up Host ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech
-			rewrite * /neondb/rest/v1{uri}
 		}
 	}
 

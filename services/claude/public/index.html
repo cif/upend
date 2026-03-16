@@ -825,6 +825,20 @@ function escapeHtml(str) {
 }
 
 render();
+
+// listen for prompts from parent dashboard (e.g. "create new app")
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'upend:send-prompt' && e.data.prompt) {
+    const prompt = e.data.prompt;
+    // add to chat and send
+    addMessage('user', prompt);
+    if (!currentSessionId) {
+      createSession(prompt);
+    } else {
+      sendMessage(prompt);
+    }
+  }
+});
 </script>
 </body>
 </html>

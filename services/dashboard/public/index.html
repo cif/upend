@@ -176,12 +176,12 @@
     <iframe x-show="rightPanel !== 'data' && rightPanel !== 'welcome'" x-ref="rightIframe" class="w-full h-full border-none"
       :src="token && rightPanel !== 'data' && rightPanel !== 'welcome' ? '/apps/' + rightPanel + '/' : 'about:blank'"></iframe>
 
-    <!-- data studio iframe -->
-    <iframe x-show="rightPanel === 'data'" class="w-full h-full border-none"
+    <!-- data studio iframe (local dev only) -->
+    <iframe x-show="rightPanel === 'data' && studioUrl !== 'about:blank'" class="w-full h-full border-none"
       :src="token && rightPanel === 'data' ? studioUrl : 'about:blank'"></iframe>
 
-    <!-- welcome / home -->
-    <div x-show="rightPanel === 'welcome'" class="p-8 max-w-2xl mx-auto">
+    <!-- welcome / home / data (production) -->
+    <div x-show="rightPanel === 'welcome' || (rightPanel === 'data' && studioUrl === 'about:blank')" class="p-8 max-w-2xl mx-auto">
       <h2 class="text-accent font-bold text-lg mb-6">what you can do with upend</h2>
 
       <div class="space-y-4">

@@ -29,6 +29,12 @@ echo "→ installing claude code"
 bun install -g @anthropic-ai/claude-code
 claude --version
 
+echo "→ symlinking binaries to /usr/local/bin"
+sudo ln -sf "$HOME/.bun/bin/bun" /usr/local/bin/bun
+sudo ln -sf "$HOME/.bun/bin/bunx" /usr/local/bin/bunx
+sudo ln -sf "$HOME/.bun/bin/claude" /usr/local/bin/claude
+sudo ln -sf "$HOME/.bun/bin/dotenvx" /usr/local/bin/dotenvx
+
 echo "→ setting up /opt/upend"
 sudo mkdir -p /opt/upend
 sudo chown "$(whoami):$(whoami)" /opt/upend

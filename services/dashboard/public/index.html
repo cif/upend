@@ -401,7 +401,8 @@ function dashboard() {
     connectWS(sessionId) {
       if (this.ws) { this.ws.close(); this.ws = null; }
 
-      const wsUrl = `ws://${location.host}/claude/ws/${sessionId}?token=${encodeURIComponent(this.token)}`;
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProto}//${location.host}/claude/ws/${sessionId}?token=${encodeURIComponent(this.token)}`;
       console.log('[ws] connecting:', wsUrl);
       this.ws = new WebSocket(wsUrl);
       this.isRunning = true;

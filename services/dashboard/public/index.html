@@ -170,10 +170,62 @@
   <div class="w-1 bg-border cursor-col-resize shrink-0 hover:bg-accent"
     @mousedown="startResize($event)"></div>
 
-  <!-- right: iframe (studio or app) -->
-  <div class="flex-1 min-h-0 min-w-0" id="panel-right">
-    <iframe x-ref="rightIframe" class="w-full h-full border-none"
-      :src="token ? (rightPanel === 'data' ? studioUrl : '/apps/' + rightPanel + '/') : 'about:blank'"></iframe>
+  <!-- right panel -->
+  <div class="flex-1 min-h-0 min-w-0 overflow-y-auto" id="panel-right">
+    <!-- app iframe -->
+    <iframe x-show="rightPanel !== 'data'" x-ref="rightIframe" class="w-full h-full border-none"
+      :src="token && rightPanel !== 'data' ? '/apps/' + rightPanel + '/' : 'about:blank'"></iframe>
+
+    <!-- studio iframe (local dev only) -->
+    <iframe x-show="rightPanel === 'data' && studioUrl !== 'about:blank'" class="w-full h-full border-none"
+      :src="token ? studioUrl : 'about:blank'"></iframe>
+
+    <!-- data welcome (production — no drizzle studio) -->
+    <div x-show="rightPanel === 'data' && studioUrl === 'about:blank'" class="p-8 max-w-2xl mx-auto">
+      <h2 class="text-accent font-bold text-lg mb-6">what you can do with upend</h2>
+
+      <div class="space-y-4">
+        <div class="bg-surface border border-border rounded-lg p-4">
+          <h3 class="text-sm font-bold text-gray-200 mb-2">talk to claude</h3>
+          <p class="text-xs text-muted leading-relaxed">Tell claude to create tables, add columns, build apps, write migrations — anything. It has full access to the codebase and database.</p>
+          <div class="mt-3 space-y-1">
+            <p class="text-xs text-muted italic cursor-pointer hover:text-accent" @click="prompt = 'create a products table with name, price, description, and an image_url'; $refs.chatInput.focus()">"create a products table with name, price, description, and image_url"</p>
+            <p class="text-xs text-muted italic cursor-pointer hover:text-accent" @click="prompt = 'build me a CRUD app for managing products at apps/products'; $refs.chatInput.focus()">"build me a CRUD app for managing products at apps/products"</p>
+            <p class="text-xs text-muted italic cursor-pointer hover:text-accent" @click="prompt = 'add RLS policies to the products table so users can only see their own products'; $refs.chatInput.focus()">"add RLS policies so users only see their own products"</p>
+          </div>
+        </div>
+
+        <div class="bg-surface border border-border rounded-lg p-4">
+          <h3 class="text-sm font-bold text-gray-200 mb-2">your tables</h3>
+          <div x-init="loadTables()" class="space-y-1">
+            <template x-for="t in tables" :key="t">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-gray-200 font-mono" x-text="t"></span>
+                <span class="text-muted cursor-pointer hover:text-accent" @click="prompt = 'show me the schema for the ' + t + ' table'; $refs.chatInput.focus()">inspect →</span>
+              </div>
+            </template>
+            <p x-show="tables.length === 0" class="text-muted text-xs">loading tables...</p>
+          </div>
+        </div>
+
+        <div class="bg-surface border border-border rounded-lg p-4">
+          <h3 class="text-sm font-bold text-gray-200 mb-2">apps</h3>
+          <template x-for="app in apps" :key="app.name">
+            <div class="flex items-center justify-between text-xs mb-1">
+              <span class="text-gray-200 font-mono" x-text="app.name"></span>
+              <span class="text-accent cursor-pointer" @click="openApp(app.name)">open →</span>
+            </div>
+          </template>
+          <p x-show="apps.length === 0" class="text-muted text-xs">no apps yet — tell claude to build one</p>
+        </div>
+
+        <div class="bg-surface border border-border rounded-lg p-4">
+          <h3 class="text-sm font-bold text-gray-200 mb-2">data API</h3>
+          <p class="text-xs text-muted leading-relaxed mb-2">Your tables are available as REST endpoints via the Neon Data API (PostgREST).</p>
+          <code class="text-xs text-accent block bg-bg rounded px-3 py-2 font-mono">GET /api/data/&lt;table&gt;?order=created_at.desc&amp;limit=10</code>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -200,6 +252,7 @@ function dashboard() {
     assistantBuffer: '',
 
     // right panel
+    tables: [],
     rightPanel: 'data',
     studioUrl: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
       ? 'https://local.drizzle.studio'
@@ -306,6 +359,11 @@ function dashboard() {
         // connect websocket if active
         if (session.status === 'active') {
           this.connectWS(id);
+          // check if last message is already complete (not waiting on claude)
+          const lastMsg = session.messages?.[session.messages.length - 1];
+          if (!lastMsg || lastMsg.status === 'complete' || lastMsg.status === 'error') {
+            this.isRunning = false;
+          }
         }
       } catch (err) {
         console.error('[openSession]', err);
@@ -465,6 +523,13 @@ function dashboard() {
     },
 
     // ---------- right panel ----------
+
+    async loadTables() {
+      try {
+        const res = await fetch('/api/tables', { headers: this.authHeaders() });
+        if (res.ok) this.tables = (await res.json()).map(t => t.name);
+      } catch {}
+    },
 
     async loadApps() {
       try {

@@ -1,28 +1,42 @@
-{$UPEND_DOMAIN:localhost} {
-	# Live apps — hot from filesystem
+{
+	auto_https off
+}
+
+:80 {
+	# Neon Data API proxy
+	handle_path /api/data/* {
+		rewrite * /neondb/rest/v1{uri}
+		reverse_proxy https://ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech {
+			header_up Host ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech
+		}
+	}
+
+	# Live apps
 	handle_path /apps/* {
 		root * /opt/upend/apps
 		try_files {path} {path}/index.html
 		file_server
 	}
 
-	# API service
+	# API service (auth, JWKS)
 	handle_path /api/* {
 		reverse_proxy localhost:3001
 	}
 
-	# Claude editing service + chat UI
+	# Claude service + WebSocket
 	handle_path /claude/* {
 		reverse_proxy localhost:3002
 	}
 
-	# JWKS
+	# JWKS at root
 	handle /.well-known/* {
 		reverse_proxy localhost:3001
 	}
 
-	# Default → API
+	# Default → dashboard
 	handle {
-		reverse_proxy localhost:3001
+		root * /opt/upend/services/dashboard/public
+		try_files {path} /index.html
+		file_server
 	}
 }

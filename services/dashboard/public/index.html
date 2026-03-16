@@ -57,14 +57,14 @@
   <div class="flex items-center gap-3">
     <button @click="drawerOpen = !drawerOpen; if(drawerOpen) loadSessions()"
       class="text-lg px-2 py-1 rounded text-muted hover:text-gray-200 hover:bg-border cursor-pointer">☰</button>
-    <span class="text-accent font-bold text-sm cursor-pointer" @click="rightPanel = 'welcome'">upend</span>
+    <span class="text-accent font-bold text-sm cursor-pointer" @click="rightPanel = 'home'">upend</span>
     <div class="flex gap-0.5">
       <button @click="rightPanel = 'data'"
         :class="rightPanel === 'data' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
         class="px-3 py-1 text-xs rounded cursor-pointer font-mono">data</button>
       <div class="relative" @click.away="appsOpen = false">
         <button @click="appsOpen = !appsOpen; loadApps()"
-          :class="rightPanel !== 'data' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
+          :class="rightPanel !== 'data' && rightPanel !== 'home' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
           class="px-3 py-1 text-xs rounded cursor-pointer font-mono">apps ▾</button>
         <div x-show="appsOpen" x-transition
           class="absolute top-full left-0 mt-1 bg-surface border border-border rounded-md min-w-[180px] p-1 z-50 shadow-xl">
@@ -172,16 +172,16 @@
 
   <!-- right panel -->
   <div class="flex-1 min-h-0 min-w-0 overflow-y-auto" id="panel-right">
-    <!-- app iframe -->
-    <iframe x-show="rightPanel !== 'data' && rightPanel !== 'welcome'" x-ref="rightIframe" class="w-full h-full border-none"
-      :src="token && rightPanel !== 'data' && rightPanel !== 'welcome' ? '/apps/' + rightPanel + '/' : 'about:blank'"></iframe>
+    <!-- app iframe (only when an app is selected) -->
+    <iframe x-show="rightPanel !== 'data' && rightPanel !== 'home'" x-ref="rightIframe" class="w-full h-full border-none"
+      :src="token && rightPanel !== 'data' && rightPanel !== 'home' ? '/apps/' + rightPanel + '/' : 'about:blank'"></iframe>
 
     <!-- data studio iframe (local dev only) -->
     <iframe x-show="rightPanel === 'data' && studioUrl !== 'about:blank'" class="w-full h-full border-none"
       :src="token && rightPanel === 'data' ? studioUrl : 'about:blank'"></iframe>
 
-    <!-- welcome / home / data (production) -->
-    <div x-show="rightPanel === 'welcome' || (rightPanel === 'data' && studioUrl === 'about:blank')" class="p-8 max-w-2xl mx-auto">
+    <!-- home panel (default) + data fallback (production has no studio) -->
+    <div x-show="rightPanel === 'home' || (rightPanel === 'data' && studioUrl === 'about:blank')" class="p-8 max-w-2xl mx-auto">
       <h2 class="text-accent font-bold text-lg mb-6">what you can do with upend</h2>
 
       <div class="space-y-4">
@@ -253,7 +253,7 @@ function dashboard() {
 
     // right panel
     tables: [],
-    rightPanel: 'welcome',
+    rightPanel: 'home',
     studioUrl: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
       ? 'https://local.drizzle.studio'
       : 'about:blank',

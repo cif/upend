@@ -22,7 +22,7 @@ app.get("/tables", requireAuth, async (c) => {
   const tables = await sql`
     SELECT t.tablename as name,
       (SELECT count(*) FROM information_schema.columns c WHERE c.table_name = t.tablename AND c.table_schema = 'public') as columns
-    FROM pg_tables t WHERE t.schemaname = 'public' AND t.tablename NOT LIKE '\_%' ESCAPE '\'
+    FROM pg_tables t WHERE t.schemaname = 'public' AND t.tablename != '_migrations'
     ORDER BY t.tablename
   `;
   return c.json(tables);

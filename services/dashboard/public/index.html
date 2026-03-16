@@ -233,10 +233,12 @@
                 <span class="text-xs text-muted" x-text="tableColumns.length + ' columns'"></span>
               </div>
               <div class="flex gap-2">
+                <!-- TODO: CSV upload (needs proper parsing)
                 <label class="bg-accent text-black text-xs px-3 py-1 rounded cursor-pointer font-mono">
                   upload CSV
                   <input type="file" accept=".csv" class="hidden" @change="uploadCSV($event)">
                 </label>
+                -->
                 <button @click="prompt = 'build an admin CRUD app for the ' + selectedTable + ' table at apps/' + selectedTable; $refs.chatInput.focus()"
                   class="text-xs text-muted border border-border px-3 py-1 rounded cursor-pointer hover:text-accent hover:border-accent font-mono">
                   generate CRUD app
@@ -684,8 +686,12 @@ function dashboard() {
     },
 
     refreshRightPanel() {
+      // refresh app iframe if showing
       const iframe = this.$refs.rightIframe;
-      if (iframe?.src) iframe.src = iframe.src;
+      if (iframe?.src && iframe.src !== 'about:blank') iframe.src = iframe.src;
+      // refresh data panel if showing
+      this.loadTables();
+      if (this.selectedTable) this.selectTable(this.selectedTable);
     },
 
     // ---------- resizer ----------

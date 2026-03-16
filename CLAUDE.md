@@ -62,7 +62,9 @@ PostgREST filter operators: eq, neq, gt, gte, lt, lte, like, ilike, is, in, not
 Example: `GET /things?name=ilike.*widget*&order=created_at.desc&limit=10`
 
 All requests need: `Authorization: Bearer <jwt>` and `apikey: <anon-key>` headers.
-The JWT comes from our auth endpoints. RLS policies enforce row-level access.
+The JWT comes from our auth endpoints. The JWT contains `sub` (user id), `email`, `role` (postgres role), and `app_role` (user/admin).
+
+No RLS policies are set by default — the user defines access control as needed, either via SQL RLS policies or app-level logic. When the user asks you to add access control, help them decide whether SQL-level RLS or app-level checks are the better fit for their use case.
 
 ## Building CRUD apps
 

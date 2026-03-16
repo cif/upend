@@ -57,9 +57,11 @@ async function getPublicKey() {
 }
 
 // sign a JWT for a user
-export async function signToken(userId: string, email: string, role: string = "user") {
+// "role" in the JWT is the Postgres role for PostgREST (must be "authenticated")
+// "app_role" is our app-level role (user, admin, etc.)
+export async function signToken(userId: string, email: string, appRole: string = "user") {
   const key = await getPrivateKey();
-  return new SignJWT({ email, role })
+  return new SignJWT({ email, role: "authenticated", app_role: appRole })
     .setProtectedHeader({ alg: ALG, kid: "upend-1" })
     .setSubject(userId)
     .setIssuer(ISSUER)

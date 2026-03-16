@@ -4,630 +4,531 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>upend</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0a0a0a',
+            surface: '#141414',
+            border: '#262626',
+            muted: '#737373',
+            accent: '#f97316',
+            'accent-dim': '#431407',
+          },
+          fontFamily: {
+            mono: ['SF Mono', 'Fira Code', 'Cascadia Code', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    :root {
-      --bg: #0a0a0a;
-      --surface: #141414;
-      --border: #262626;
-      --text: #e5e5e5;
-      --muted: #737373;
-      --accent: #f97316;
-      --accent-dim: #431407;
-      --green: #22c55e;
-      --red: #ef4444;
-    }
-
-    body {
-      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-      background: var(--bg);
-      color: var(--text);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .topbar {
-      height: 40px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 12px;
-      flex-shrink: 0;
-      z-index: 100;
-    }
-
-    .topbar .left { display: flex; align-items: center; gap: 12px; }
-
-    .topbar .logo {
-      font-size: 13px;
-      font-weight: 700;
-      color: var(--accent);
-      letter-spacing: -0.5px;
-    }
-
-    .topbar .nav { display: flex; gap: 2px; }
-
-    .topbar .nav-btn {
-      padding: 5px 12px;
-      font-size: 11px;
-      color: var(--muted);
-      background: none;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-family: inherit;
-      position: relative;
-    }
-
-    .topbar .nav-btn:hover { color: var(--text); background: var(--border); }
-    .topbar .nav-btn.active { color: var(--accent); background: var(--accent-dim); }
-
-    .topbar .right { display: flex; align-items: center; gap: 10px; }
-    .topbar .user-info { font-size: 11px; color: var(--muted); }
-
-    .topbar .btn {
-      padding: 4px 10px;
-      font-size: 11px;
-      color: var(--muted);
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      cursor: pointer;
-      font-family: inherit;
-    }
-    .topbar .btn:hover { color: var(--text); border-color: var(--muted); }
-
-    .session-label {
-      font-size: 11px;
-      color: var(--muted);
-      max-width: 200px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .topbar .status {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .topbar .dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--muted);
-    }
-
-    .topbar .dot.active { background: var(--green); }
-    .topbar .dot.running { background: var(--accent); animation: pulse 1s infinite; }
-    .topbar .dot.error { background: var(--red); }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
-    /* apps dropdown */
-    .dropdown { position: relative; }
-
-    .dropdown-menu {
-      display: none;
-      position: absolute;
-      top: 100%;
-      left: 0;
-      margin-top: 4px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      min-width: 180px;
-      padding: 4px;
-      z-index: 200;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    }
-
-    .dropdown-menu.open { display: block; }
-
-    .dropdown-menu .item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 10px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--text);
-    }
-
-    .dropdown-menu .item:hover { background: var(--border); }
-    .dropdown-menu .item.active { color: var(--accent); background: var(--accent-dim); }
-
-    .dropdown-menu .item .popout {
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 10px;
-      padding: 2px 6px;
-    }
-    .dropdown-menu .item .popout:hover { color: var(--text); }
-
-    .dropdown-menu .empty {
-      padding: 12px;
-      color: var(--muted);
-      font-size: 11px;
-      text-align: center;
-    }
-
-    /* panels */
-    .panels {
-      flex: 1;
-      display: flex;
-      min-height: 0;
-    }
-
-    .panel {
-      flex: 1;
-      min-height: 0;
-    }
-
-    .panel iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-    }
-
-    .resizer {
-      width: 4px;
-      cursor: col-resize;
-      background: var(--border);
-      flex-shrink: 0;
-    }
-    .resizer:hover { background: var(--accent); }
-
-    #right-iframe { display: block; }
-
-    /* sessions drawer */
-    .sessions-drawer {
-      position: fixed;
-      left: 0;
-      top: 40px;
-      bottom: 0;
-      width: 280px;
-      background: var(--surface);
-      border-right: 1px solid var(--border);
-      z-index: 50;
-      transform: translateX(-100%);
-      transition: transform 0.2s;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .sessions-drawer.open { transform: translateX(0); }
-
-    .sessions-drawer .session-item {
-      padding: 8px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      margin-bottom: 2px;
-    }
-
-    .sessions-drawer .session-item:hover { background: var(--border); color: var(--text); }
-    .sessions-drawer .session-item.active { background: var(--accent-dim); color: var(--accent); }
-
-    /* login */
-    .login-overlay {
-      position: fixed; inset: 0;
-      background: var(--bg);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 1000;
-    }
-    .login-overlay.hidden { display: none; }
-
-    .login-overlay form {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 32px; width: 340px;
-      display: flex; flex-direction: column; gap: 12px;
-    }
-    .login-overlay h2 { font-size: 16px; color: var(--accent); margin-bottom: 4px; }
-    .login-overlay input {
-      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-      padding: 10px 12px; color: var(--text); font-family: inherit; font-size: 13px; outline: none;
-    }
-    .login-overlay input:focus { border-color: var(--accent); }
-    .login-overlay button[type="submit"] {
-      padding: 10px; background: var(--accent); color: #000; border: none;
-      border-radius: 6px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-    }
-    .login-overlay .toggle { font-size: 12px; color: var(--muted); text-align: center; cursor: pointer; }
-    .login-overlay .toggle:hover { color: var(--text); }
-    .login-overlay .error { color: var(--red); font-size: 12px; }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .dot-pulse { animation: pulse-dot 1s infinite; }
+    /* hide scrollbar but allow scroll */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
-<body>
+<body class="bg-bg text-gray-200 font-mono h-screen flex flex-col overflow-hidden" x-data="dashboard()" x-cloak>
 
-<div class="login-overlay" id="login-overlay">
-  <form id="auth-form">
-    <h2 id="auth-title">log in</h2>
-    <input name="email" type="email" placeholder="email" autocomplete="email" required>
-    <input name="password" type="password" placeholder="password" autocomplete="current-password" required>
-    <div class="error" id="auth-error"></div>
-    <button type="submit" id="auth-submit">log in</button>
-    <div class="toggle" id="auth-toggle">need an account? sign up</div>
+<!-- login overlay -->
+<div x-show="!token" class="fixed inset-0 bg-bg flex items-center justify-center z-50">
+  <form @submit.prevent="login" class="bg-surface border border-border rounded-xl p-8 w-80 flex flex-col gap-3">
+    <h2 class="text-accent font-bold" x-text="isSignup ? 'sign up' : 'log in'"></h2>
+    <input x-model="email" type="email" placeholder="email" required
+      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+    <input x-model="password" type="password" placeholder="password" required
+      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+    <p x-show="authError" x-text="authError" class="text-red-500 text-xs"></p>
+    <button type="submit" class="bg-accent text-black rounded-md py-2 text-sm font-bold cursor-pointer"
+      x-text="isSignup ? 'sign up' : 'log in'"></button>
+    <p class="text-muted text-xs text-center cursor-pointer hover:text-gray-200"
+      @click="isSignup = !isSignup" x-text="isSignup ? 'already have an account? log in' : 'need an account? sign up'"></p>
   </form>
 </div>
 
-<div class="topbar" id="topbar" style="display:none">
-  <div class="left">
-    <button class="nav-btn" id="btn-hamburger" title="sessions" style="font-size:18px;padding:4px 10px">☰</button>
-    <div class="logo">upend</div>
-    <div class="nav">
-      <button class="nav-btn active" id="btn-data">data</button>
-      <div class="dropdown">
-        <button class="nav-btn" id="btn-apps">apps ▾</button>
-        <div class="dropdown-menu" id="apps-menu"></div>
+<!-- top bar -->
+<div x-show="token" class="h-10 bg-surface border-b border-border flex items-center justify-between px-3 shrink-0 z-40">
+  <div class="flex items-center gap-3">
+    <button @click="drawerOpen = !drawerOpen; if(drawerOpen) loadSessions()"
+      class="text-lg px-2 py-1 rounded text-muted hover:text-gray-200 hover:bg-border cursor-pointer">☰</button>
+    <span class="text-accent font-bold text-sm">upend</span>
+    <div class="flex gap-0.5">
+      <button @click="rightPanel = 'data'; $refs.rightIframe.src = studioUrl"
+        :class="rightPanel === 'data' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
+        class="px-3 py-1 text-xs rounded cursor-pointer font-mono">data</button>
+      <div class="relative" @click.away="appsOpen = false">
+        <button @click="appsOpen = !appsOpen; loadApps()"
+          :class="rightPanel !== 'data' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
+          class="px-3 py-1 text-xs rounded cursor-pointer font-mono">apps ▾</button>
+        <div x-show="appsOpen" x-transition
+          class="absolute top-full left-0 mt-1 bg-surface border border-border rounded-md min-w-[180px] p-1 z-50 shadow-xl">
+          <template x-for="app in apps" :key="app.name">
+            <div class="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer text-xs hover:bg-border"
+              :class="rightPanel === app.name ? 'text-accent bg-accent-dim' : 'text-gray-200'"
+              @click="openApp(app.name)">
+              <span x-text="app.name"></span>
+              <a :href="'/apps/' + app.name + '/'" target="_blank" @click.stop
+                class="text-muted text-[10px] px-1 hover:text-gray-200">&#8599;</a>
+            </div>
+          </template>
+          <p x-show="apps.length === 0" class="text-muted text-xs text-center py-3">no apps yet</p>
+          <div class="border-t border-border mt-1 pt-1">
+            <div class="px-2 py-1.5 rounded cursor-pointer text-xs text-accent hover:bg-border"
+              @click="createNewApp()">+ new app</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
-  <div class="right">
-    <span class="session-label" id="session-label">no session</span>
-    <div class="status" id="topbar-status">
-      <span class="dot" id="topbar-dot"></span>
-      <span id="topbar-status-text"></span>
+  <div class="flex items-center gap-3">
+    <span class="text-muted text-xs truncate max-w-[200px]" x-text="sessionLabel"></span>
+    <span class="flex items-center gap-1">
+      <span class="w-1.5 h-1.5 rounded-full"
+        :class="{ 'bg-muted': status === 'ready', 'bg-green-500': status === 'active' || status === 'done',
+                  'bg-accent dot-pulse': status === 'running', 'bg-red-500': status === 'error' }"></span>
+      <span class="text-muted text-xs" x-text="statusText"></span>
+    </span>
+    <button x-show="currentSessionId" @click="commitSession()"
+      class="text-green-500 border border-green-500 px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-green-500/10 font-mono">commit</button>
+    <span class="text-muted text-xs" x-text="userEmail"></span>
+    <button @click="logout()"
+      class="text-muted border border-border px-2 py-0.5 rounded text-xs cursor-pointer hover:text-gray-200 hover:border-muted font-mono">logout</button>
+  </div>
+</div>
+
+<!-- sessions drawer -->
+<div x-show="drawerOpen" x-transition:enter="transition ease-out duration-200"
+  x-transition:enter-start="-translate-x-full" x-transition:enter-end="translate-x-0"
+  x-transition:leave="transition ease-in duration-150"
+  x-transition:leave-start="translate-x-0" x-transition:leave-end="-translate-x-full"
+  @click.away="drawerOpen = false"
+  class="fixed left-0 top-10 bottom-0 w-64 bg-surface border-r border-border z-30 flex flex-col">
+  <div class="px-4 py-3 flex justify-between items-center">
+    <span class="text-muted text-xs uppercase tracking-wide">sessions</span>
+    <button @click="newSession()" class="bg-accent text-white text-xs px-3 py-1 rounded cursor-pointer font-mono">+ new</button>
+  </div>
+  <div class="flex-1 overflow-y-auto px-2 no-scrollbar">
+    <template x-for="s in sessions.filter(s => s.status === 'active')" :key="s.id">
+      <div @click="openSession(s.id)"
+        :class="s.id == currentSessionId ? 'bg-accent-dim text-accent' : 'text-muted hover:bg-border hover:text-gray-200'"
+        class="px-3 py-2 rounded-md cursor-pointer text-xs truncate mb-0.5"
+        x-text="s.prompt.slice(0, 50)"></div>
+    </template>
+    <p x-show="sessions.filter(s => s.status === 'active').length === 0"
+      class="text-muted text-xs text-center py-6">no active sessions</p>
+  </div>
+</div>
+
+<!-- main panels -->
+<div x-show="token" class="flex-1 flex min-h-0">
+  <!-- left: chat (native DOM) -->
+  <div class="flex-1 flex flex-col min-h-0 min-w-0" id="panel-left">
+    <!-- messages -->
+    <div class="flex-1 overflow-y-auto px-5 py-4 space-y-4 no-scrollbar" x-ref="messages">
+      <template x-for="(msg, i) in messages" :key="i">
+        <div class="max-w-3xl mx-auto">
+          <div class="text-xs font-bold uppercase tracking-wide mb-1"
+            :class="{ 'text-blue-500': msg.role === 'user', 'text-accent': msg.role === 'assistant', 'text-muted': msg.role === 'system' }"
+            x-text="msg.role"></div>
+          <template x-if="msg.role === 'tool_use'">
+            <div class="bg-surface border border-border rounded-md px-3 py-2">
+              <div class="text-green-500 text-xs font-bold" x-text="'▶ ' + msg.name"></div>
+              <pre class="text-muted text-xs mt-1 overflow-x-auto" x-text="typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)"></pre>
+            </div>
+          </template>
+          <template x-if="msg.role !== 'tool_use'">
+            <div class="text-sm leading-relaxed whitespace-pre-wrap break-words" x-text="msg.content"></div>
+          </template>
+        </div>
+      </template>
+      <div x-show="messages.length === 0" class="max-w-3xl mx-auto">
+        <div class="text-xs font-bold uppercase tracking-wide mb-1 text-muted">system</div>
+        <div class="text-sm text-muted">start a new session or tell claude what to build.</div>
+      </div>
     </div>
-    <button class="btn" id="btn-commit" style="display:none;color:var(--green);border-color:var(--green)">commit</button>
-    <span class="user-info" id="user-info"></span>
-    <button class="btn" id="logout-btn">logout</button>
+    <!-- input -->
+    <div class="border-t border-border px-5 py-3 shrink-0">
+      <form @submit.prevent="sendPrompt()" class="max-w-3xl mx-auto flex gap-2">
+        <textarea x-model="prompt" x-ref="chatInput" rows="1" placeholder="tell claude what to do..."
+          @keydown.enter.prevent="if(!$event.shiftKey) sendPrompt()"
+          @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 200) + 'px'"
+          class="flex-1 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-gray-200 font-mono resize-none outline-none focus:border-accent min-h-[40px] max-h-[200px]"></textarea>
+        <button type="submit" :disabled="isRunning || !prompt.trim()"
+          class="bg-accent text-black px-5 py-2 rounded-lg text-sm font-bold cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed font-mono">send</button>
+      </form>
+      <p class="max-w-3xl mx-auto text-muted text-xs mt-2">shift+enter for newline</p>
+    </div>
   </div>
-</div>
 
-<div class="sessions-drawer" id="sessions-drawer">
-  <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
-    <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted)">sessions</span>
-    <button id="btn-new-session" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:4px;font-family:inherit;font-size:11px;cursor:pointer">+ new</button>
-  </div>
-  <div id="sessions-list" style="padding:0 8px;flex:1;overflow-y:auto"></div>
-</div>
+  <!-- resizer -->
+  <div class="w-1 bg-border cursor-col-resize shrink-0 hover:bg-accent"
+    @mousedown="startResize($event)"></div>
 
-<div class="panels" id="panels" style="display:none">
-  <div class="panel" id="panel-left">
-    <iframe id="iframe-claude"></iframe>
-  </div>
-  <div class="resizer" id="resizer"></div>
-  <div class="panel" id="panel-right">
-    <iframe id="right-iframe"></iframe>
+  <!-- right: iframe (studio or app) -->
+  <div class="flex-1 min-h-0 min-w-0" id="panel-right">
+    <iframe x-ref="rightIframe" class="w-full h-full border-none"
+      :src="rightPanel === 'data' ? studioUrl : '/apps/' + rightPanel + '/'"></iframe>
   </div>
 </div>
 
 <script>
-const API = '/api';
-const CLAUDE_URL = '/claude/ui/';
-const STUDIO_URL = 'https://local.drizzle.studio';
+function dashboard() {
+  return {
+    // auth
+    token: localStorage.getItem('upend_token'),
+    userEmail: localStorage.getItem('upend_email') || '',
+    email: '', password: '', isSignup: false, authError: '',
 
-let token = localStorage.getItem('upend_token');
-let userEmail = localStorage.getItem('upend_email');
-let isSignup = false;
-let currentView = 'data'; // 'data' or app name
+    // sessions
+    sessions: [],
+    currentSessionId: localStorage.getItem('upend_dashboard_session') ? Number(localStorage.getItem('upend_dashboard_session')) : null,
+    drawerOpen: false,
 
-// ---------- auth ----------
+    // chat
+    messages: [],
+    prompt: '',
+    isRunning: false,
+    status: 'ready',
+    statusText: '',
+    ws: null,
+    assistantBuffer: '',
 
-function checkAuth() {
-  if (token) {
-    document.getElementById('login-overlay').classList.add('hidden');
-    document.getElementById('topbar').style.display = '';
-    document.getElementById('panels').style.display = '';
-    document.getElementById('user-info').textContent = userEmail || '';
-    loadIframes();
-    loadApps();
-  }
-}
+    // right panel
+    rightPanel: 'data',
+    studioUrl: 'https://local.drizzle.studio',
+    apps: [],
+    appsOpen: false,
 
-document.getElementById('auth-toggle').onclick = () => {
-  isSignup = !isSignup;
-  document.getElementById('auth-title').textContent = isSignup ? 'sign up' : 'log in';
-  document.getElementById('auth-submit').textContent = isSignup ? 'sign up' : 'log in';
-  document.getElementById('auth-toggle').textContent = isSignup
-    ? 'already have an account? log in' : 'need an account? sign up';
-};
+    // resizer state
+    _resizing: false,
 
-document.getElementById('auth-form').onsubmit = async (e) => {
-  e.preventDefault();
-  const form = new FormData(e.target);
-  try {
-    const res = await fetch(API + (isSignup ? '/auth/signup' : '/auth/login'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: form.get('email'), password: form.get('password') }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-    token = data.token;
-    userEmail = data.user.email;
-    localStorage.setItem('upend_token', token);
-    localStorage.setItem('upend_email', userEmail);
-    checkAuth();
-  } catch (err) {
-    document.getElementById('auth-error').textContent = err.message;
-  }
-};
+    get sessionLabel() {
+      if (!this.currentSessionId) return 'no session';
+      const s = this.sessions.find(s => s.id == this.currentSessionId);
+      return s?.prompt?.slice(0, 40) || `#${this.currentSessionId}`;
+    },
 
-document.getElementById('logout-btn').onclick = () => {
-  token = null; userEmail = null;
-  localStorage.removeItem('upend_token');
-  localStorage.removeItem('upend_email');
-  document.getElementById('login-overlay').classList.remove('hidden');
-  document.getElementById('topbar').style.display = 'none';
-  document.getElementById('panels').style.display = 'none';
-};
+    // ---------- init ----------
 
-// ---------- iframes ----------
-
-let iframesLoaded = false;
-
-function loadIframes() {
-  if (iframesLoaded) return;
-  iframesLoaded = true;
-  document.getElementById('iframe-claude').src = CLAUDE_URL + '?token=' + encodeURIComponent(token);
-  showData();
-
-  // restore saved session after iframe is ready
-  if (store.currentSessionId) {
-    const id = store.currentSessionId;
-    const frame = document.getElementById('iframe-claude');
-    const tryRestore = setInterval(() => {
-      try {
-        if (frame.contentWindow?.openSession) {
-          clearInterval(tryRestore);
-          store.openSession(id);
-        }
-      } catch {}
-    }, 200);
-    // give up after 10s
-    setTimeout(() => clearInterval(tryRestore), 10000);
-  }
-}
-
-// ---------- right panel switching ----------
-
-function showData() {
-  currentView = 'data';
-  document.getElementById('right-iframe').src = STUDIO_URL;
-  document.getElementById('btn-data').classList.add('active');
-  document.getElementById('btn-apps').classList.remove('active');
-}
-
-function openApp(name) {
-  currentView = name;
-  document.getElementById('right-iframe').src = `/apps/${name}/`;
-  document.getElementById('btn-data').classList.remove('active');
-  document.getElementById('btn-apps').classList.add('active');
-  document.getElementById('apps-menu').classList.remove('open');
-}
-
-// ---------- nav clicks ----------
-
-document.getElementById('btn-data').onclick = () => showData();
-
-document.getElementById('btn-apps').onclick = (e) => {
-  e.stopPropagation();
-  document.getElementById('apps-menu').classList.toggle('open');
-  loadApps();
-};
-
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.dropdown')) {
-    document.getElementById('apps-menu').classList.remove('open');
-  }
-});
-
-// ---------- apps list ----------
-
-async function loadApps() {
-  try {
-    const res = await fetch('/claude/apps', {
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-    const apps = await res.json();
-    const menu = document.getElementById('apps-menu');
-
-    let html = '';
-
-    if (apps.length) {
-      html += apps.map(app =>
-        `<div class="item ${currentView === app.name ? 'active' : ''}" onclick="openApp('${app.name}')">
-          <span>${app.name}</span>
-          <a class="popout" href="/apps/${app.name}/" target="_blank" onclick="event.stopPropagation()" title="open in new tab">&#8599;</a>
-        </div>`
-      ).join('');
-    } else {
-      html += '<div class="empty">no apps yet</div>';
-    }
-
-    html += '<div style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px">'
-      + '<div class="item" onclick="createNewApp()" style="color:var(--accent)">+ new app</div>'
-      + '</div>';
-
-    menu.innerHTML = html;
-  } catch {
-    document.getElementById('apps-menu').innerHTML = '<div class="empty">failed to load</div>';
-  }
-}
-
-function createNewApp() {
-  document.getElementById('apps-menu').classList.remove('open');
-  const name = prompt('app name (lowercase, no spaces):');
-  if (!name) return;
-  const desc = prompt('what should this app do?');
-  if (!desc) return;
-
-  // send to claude via the chat iframe
-  const claudeIframe = document.getElementById('iframe-claude');
-  claudeIframe.contentWindow?.postMessage({
-    type: 'upend:send-prompt',
-    prompt: `create an app called "${name}" in apps/${name}/. ${desc}`,
-  }, '*');
-}
-
-// ---------- session controls ----------
-
-const claudeFrame = () => document.getElementById('iframe-claude');
-
-// simple store — dashboard owns session state
-window.store = {
-  sessions: [],
-  currentSessionId: localStorage.getItem('upend_dashboard_session') ? Number(localStorage.getItem('upend_dashboard_session')) : null,
-  status: 'ready',
-
-  async loadSessions() {
-    try {
-      const res = await fetch('/claude/sessions', {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      this.sessions = await res.json();
-      this.renderDrawer();
-    } catch (err) {
-      console.error('[store] loadSessions:', err);
-    }
-  },
-
-  renderDrawer() {
-    const list = document.getElementById('sessions-list');
-    if (!list) return;
-    const active = this.sessions.filter(s => s.status === 'active');
-    list.innerHTML = active.map(s => `
-      <div class="session-item ${s.id == this.currentSessionId ? 'active' : ''}"
-           onclick="store.openSession(${s.id})">
-        ${s.prompt.slice(0, 50)}
-      </div>
-    `).join('') || '<div style="padding:12px;color:var(--muted);font-size:11px">no active sessions</div>';
-  },
-
-  openSession(id) {
-    this.currentSessionId = id;
-    localStorage.setItem('upend_dashboard_session', id);
-    const s = this.sessions.find(s => s.id == id);
-    document.getElementById('session-label').textContent = s?.prompt?.slice(0, 40) || `#${id}`;
-    document.getElementById('btn-commit').style.display = '';
-    document.getElementById('sessions-drawer').classList.remove('open');
-    // call the iframe's function directly (same origin through Caddy)
-    try {
-      claudeFrame()?.contentWindow?.openSession(id);
-    } catch (err) {
-      console.error('[store] openSession failed:', err);
-    }
-    this.renderDrawer();
-  },
-
-  newSession() {
-    this.currentSessionId = null;
-    localStorage.removeItem('upend_dashboard_session');
-    document.getElementById('session-label').textContent = 'new session';
-    document.getElementById('btn-commit').style.display = 'none';
-    document.getElementById('sessions-drawer').classList.remove('open');
-    try {
-      const w = claudeFrame()?.contentWindow;
-      if (w?.currentSessionId !== undefined) {
-        w.currentSessionId = null;
-        w.localStorage.removeItem('upend_session');
-        w.document.getElementById('messages').innerHTML = '';
-        w.document.getElementById('chat-input')?.focus();
+    init() {
+      if (this.token && this.currentSessionId) {
+        this.openSession(this.currentSessionId);
       }
-    } catch (err) {
-      console.error('[store] newSession failed:', err);
-    }
-  },
-};
+      // close drawer on outside click handled by @click.away
+      // resizer
+      document.addEventListener('mousemove', (e) => this.onResize(e));
+      document.addEventListener('mouseup', () => this.stopResize());
+    },
 
-document.getElementById('btn-hamburger').onclick = () => {
-  const drawer = document.getElementById('sessions-drawer');
-  drawer.classList.toggle('open');
-  if (drawer.classList.contains('open')) store.loadSessions();
-};
+    // ---------- auth ----------
 
-document.getElementById('btn-new-session').onclick = () => store.newSession();
+    async login() {
+      this.authError = '';
+      try {
+        const res = await fetch('/api' + (this.isSignup ? '/auth/signup' : '/auth/login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: this.email, password: this.password }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        this.token = data.token;
+        this.userEmail = data.user.email;
+        localStorage.setItem('upend_token', this.token);
+        localStorage.setItem('upend_email', this.userEmail);
+        this.loadApps();
+      } catch (err) {
+        this.authError = err.message;
+      }
+    },
 
-document.getElementById('btn-commit').onclick = () => {
-  if (confirm('Commit this session? (ends the session, changes stay as-is)')) {
-    claudeFrame()?.contentWindow?.postMessage({ type: 'upend:end-session' }, '*');
-    document.getElementById('btn-commit').style.display = 'none';
-    document.getElementById('session-label').textContent = 'committed';
-    store.currentSessionId = null;
-    store.loadSessions();
-  }
-};
+    logout() {
+      this.token = null;
+      this.userEmail = '';
+      localStorage.removeItem('upend_token');
+      localStorage.removeItem('upend_email');
+      localStorage.removeItem('upend_dashboard_session');
+      if (this.ws) { this.ws.close(); this.ws = null; }
+      this.messages = [];
+      this.currentSessionId = null;
+    },
 
-// listen for session state from chat iframe
-window.addEventListener('message', (e) => {
-  if (e.data?.type === 'upend:session-changed') {
-    store.currentSessionId = e.data.sessionId;
-    const label = document.getElementById('session-label');
-    const commitBtn = document.getElementById('btn-commit');
-    if (e.data.sessionId) {
-      label.textContent = e.data.prompt ? e.data.prompt.slice(0, 40) : `session #${e.data.sessionId}`;
-      commitBtn.style.display = (e.data.status === 'active') ? '' : 'none';
-    } else {
-      label.textContent = 'no session';
-      commitBtn.style.display = 'none';
-    }
-    store.loadSessions();
-  }
+    authHeaders() {
+      return { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' };
+    },
 
-  if (e.data?.type === 'upend:status') {
-    const dot = document.getElementById('topbar-dot');
-    const text = document.getElementById('topbar-status-text');
-    if (dot) dot.className = `dot ${e.data.state}`;
-    if (text) text.textContent = e.data.text;
-  }
+    // ---------- sessions ----------
 
-  if (e.data?.type === 'upend:turn-complete') {
-    const iframe = document.getElementById('right-iframe');
-    if (iframe?.src) iframe.src = iframe.src;
-    loadApps();
-  }
-});
+    async loadSessions() {
+      try {
+        const res = await fetch('/claude/sessions', { headers: this.authHeaders() });
+        if (res.ok) this.sessions = await res.json();
+      } catch (err) {
+        console.error('[sessions]', err);
+      }
+    },
 
-// ---------- resizer ----------
+    async openSession(id) {
+      try {
+        const res = await fetch(`/claude/sessions/${id}`, { headers: this.authHeaders() });
+        if (!res.ok) throw new Error('session not found');
+        const session = await res.json();
 
-const resizer = document.getElementById('resizer');
-let isResizing = false;
+        this.currentSessionId = Number(id);
+        localStorage.setItem('upend_dashboard_session', id);
+        this.drawerOpen = false;
 
-resizer.addEventListener('mousedown', () => {
-  isResizing = true;
-  document.body.style.cursor = 'col-resize';
-  document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = 'none');
-});
+        // render messages
+        this.messages = [];
+        if (session.messages) {
+          for (const msg of session.messages) {
+            this.messages.push({ role: 'user', content: msg.content });
+            if (msg.result) {
+              this.messages.push({
+                role: msg.status === 'error' ? 'system' : 'assistant',
+                content: msg.result,
+              });
+            }
+          }
+        }
 
-document.addEventListener('mousemove', (e) => {
-  if (!isResizing) return;
-  const rect = document.getElementById('panels').getBoundingClientRect();
-  const pct = Math.max(20, Math.min(80, ((e.clientX - rect.left) / rect.width) * 100));
-  document.getElementById('panel-left').style.flex = `0 0 ${pct}%`;
-  document.getElementById('panel-right').style.flex = `0 0 ${100 - pct}%`;
-});
+        this.setStatus(session.status === 'active' ? 'active' : session.status, session.status);
+        this.scrollToBottom();
 
-document.addEventListener('mouseup', () => {
-  if (!isResizing) return;
-  isResizing = false;
-  document.body.style.cursor = '';
-  document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = '');
-});
+        // connect websocket if active
+        if (session.status === 'active') {
+          this.connectWS(id);
+        }
+      } catch (err) {
+        console.error('[openSession]', err);
+        this.messages.push({ role: 'system', content: `could not load session ${id}: ${err.message}` });
+        this.currentSessionId = null;
+        localStorage.removeItem('upend_dashboard_session');
+      }
+    },
 
-// ---------- init ----------
+    newSession() {
+      this.currentSessionId = null;
+      localStorage.removeItem('upend_dashboard_session');
+      this.messages = [];
+      this.drawerOpen = false;
+      if (this.ws) { this.ws.close(); this.ws = null; }
+      this.setStatus('ready', 'ready');
+      this.$nextTick(() => this.$refs.chatInput?.focus());
+    },
 
-checkAuth();
+    async commitSession() {
+      if (!this.currentSessionId) return;
+      if (!confirm('Commit this session? (ends it, changes stay as-is)')) return;
+      try {
+        await fetch(`/claude/sessions/${this.currentSessionId}/end`, {
+          method: 'POST', headers: this.authHeaders(),
+        });
+        this.messages.push({ role: 'system', content: 'session committed.' });
+        this.setStatus('done', 'committed');
+        this.currentSessionId = null;
+        localStorage.removeItem('upend_dashboard_session');
+        if (this.ws) { this.ws.close(); this.ws = null; }
+        this.loadSessions();
+      } catch (err) {
+        this.messages.push({ role: 'system', content: `commit failed: ${err.message}` });
+      }
+    },
+
+    // ---------- chat ----------
+
+    async sendPrompt() {
+      const text = this.prompt.trim();
+      if (!text || this.isRunning) return;
+      this.prompt = '';
+      this.messages.push({ role: 'user', content: text });
+      this.scrollToBottom();
+
+      if (!this.currentSessionId) {
+        await this.createSession(text);
+      } else {
+        await this.sendMessage(text);
+      }
+    },
+
+    async createSession(text) {
+      this.setStatus('running', 'creating session...');
+      try {
+        const res = await fetch('/claude/sessions', {
+          method: 'POST',
+          headers: this.authHeaders(),
+          body: JSON.stringify({ prompt: text, force: true }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || data.message);
+
+        this.currentSessionId = Number(data.session.id);
+        localStorage.setItem('upend_dashboard_session', this.currentSessionId);
+        this.connectWS(this.currentSessionId);
+        this.loadSessions();
+      } catch (err) {
+        this.messages.push({ role: 'system', content: `failed to create session: ${err.message}` });
+        this.setStatus('error', 'failed');
+      }
+    },
+
+    async sendMessage(text) {
+      this.setStatus('running', 'sending...');
+      try {
+        const res = await fetch(`/claude/sessions/${this.currentSessionId}/messages`, {
+          method: 'POST',
+          headers: this.authHeaders(),
+          body: JSON.stringify({ prompt: text }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+      } catch (err) {
+        this.messages.push({ role: 'system', content: `failed: ${err.message}\n\ntry again or start a new session.` });
+        this.setStatus('error', 'failed');
+      }
+    },
+
+    // ---------- websocket ----------
+
+    connectWS(sessionId) {
+      if (this.ws) { this.ws.close(); this.ws = null; }
+
+      const wsUrl = `ws://${location.host}/claude/ws/${sessionId}?token=${encodeURIComponent(this.token)}`;
+      console.log('[ws] connecting:', wsUrl);
+      this.ws = new WebSocket(wsUrl);
+      this.isRunning = true;
+      this.assistantBuffer = '';
+
+      this.ws.onopen = () => {
+        console.log('[ws] connected');
+        this.setStatus('running', 'connected');
+      };
+
+      this.ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+
+        if (data.type === 'text') {
+          this.assistantBuffer += data.text;
+          // update or create the assistant message
+          const last = this.messages[this.messages.length - 1];
+          if (last?.role === 'assistant' && last._streaming) {
+            last.content = this.assistantBuffer;
+          } else {
+            this.messages.push({ role: 'assistant', content: this.assistantBuffer, _streaming: true });
+          }
+          this.scrollToBottom();
+        }
+
+        else if (data.type === 'tool_use') {
+          this.messages.push({ role: 'tool_use', name: data.name, content: data.input });
+          this.scrollToBottom();
+        }
+
+        else if (data.type === 'status') {
+          if (data.status === 'complete') {
+            this.assistantBuffer = '';
+            this.isRunning = false;
+            this.setStatus('done', 'done');
+            // mark streaming message as final
+            const last = this.messages[this.messages.length - 1];
+            if (last?._streaming) delete last._streaming;
+            // refresh right panel
+            this.refreshRightPanel();
+            this.loadApps();
+          } else if (data.status === 'error') {
+            this.assistantBuffer = '';
+            this.isRunning = false;
+            this.setStatus('error', 'error');
+            this.messages.push({ role: 'system', content: `claude error: ${data.error || 'unknown'}\n\nsend another message to retry, or start a new session.` });
+            this.scrollToBottom();
+          } else if (data.status === 'running') {
+            this.assistantBuffer = '';
+            this.isRunning = true;
+            this.setStatus('running', 'claude is working...');
+          }
+        }
+      };
+
+      this.ws.onclose = () => {
+        console.log('[ws] disconnected');
+        if (this.isRunning) this.setStatus('error', 'disconnected');
+      };
+    },
+
+    // ---------- right panel ----------
+
+    async loadApps() {
+      try {
+        const res = await fetch('/claude/apps', { headers: this.authHeaders() });
+        if (res.ok) this.apps = await res.json();
+      } catch {}
+    },
+
+    openApp(name) {
+      this.rightPanel = name;
+      this.appsOpen = false;
+    },
+
+    createNewApp() {
+      this.appsOpen = false;
+      const name = window.prompt('app name (lowercase, no spaces):');
+      if (!name) return;
+      const desc = window.prompt('what should this app do?');
+      if (!desc) return;
+      this.prompt = `create an app called "${name}" in apps/${name}/. ${desc}`;
+      this.sendPrompt();
+    },
+
+    refreshRightPanel() {
+      const iframe = this.$refs.rightIframe;
+      if (iframe?.src) iframe.src = iframe.src;
+    },
+
+    // ---------- resizer ----------
+
+    startResize(e) {
+      this._resizing = true;
+      document.body.style.cursor = 'col-resize';
+      document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = 'none');
+    },
+
+    onResize(e) {
+      if (!this._resizing) return;
+      const panels = document.querySelector('.flex-1.flex.min-h-0');
+      if (!panels) return;
+      const rect = panels.getBoundingClientRect();
+      const pct = Math.max(20, Math.min(80, ((e.clientX - rect.left) / rect.width) * 100));
+      document.getElementById('panel-left').style.flex = `0 0 ${pct}%`;
+      document.getElementById('panel-right').style.flex = `0 0 ${100 - pct}%`;
+    },
+
+    stopResize() {
+      if (!this._resizing) return;
+      this._resizing = false;
+      document.body.style.cursor = '';
+      document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = '');
+    },
+
+    // ---------- helpers ----------
+
+    setStatus(s, text) {
+      this.status = s;
+      this.statusText = text;
+    },
+
+    scrollToBottom() {
+      this.$nextTick(() => {
+        const el = this.$refs.messages;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+  };
+}
 </script>
 </body>
 </html>

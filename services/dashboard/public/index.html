@@ -82,6 +82,39 @@
     }
     .topbar .btn:hover { color: var(--text); border-color: var(--muted); }
 
+    .session-label {
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .topbar .status {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .topbar .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    .topbar .dot.active { background: var(--green); }
+    .topbar .dot.running { background: var(--accent); animation: pulse 1s infinite; }
+    .topbar .dot.error { background: var(--red); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
     /* apps dropdown */
     .dropdown { position: relative; }
 
@@ -159,6 +192,39 @@
 
     #right-iframe { display: block; }
 
+    /* sessions drawer */
+    .sessions-drawer {
+      position: fixed;
+      left: 0;
+      top: 40px;
+      bottom: 0;
+      width: 280px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      z-index: 50;
+      transform: translateX(-100%);
+      transition: transform 0.2s;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sessions-drawer.open { transform: translateX(0); }
+
+    .sessions-drawer .session-item {
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+
+    .sessions-drawer .session-item:hover { background: var(--border); color: var(--text); }
+    .sessions-drawer .session-item.active { background: var(--accent-dim); color: var(--accent); }
+
     /* login */
     .login-overlay {
       position: fixed; inset: 0;
@@ -205,6 +271,7 @@
 
 <div class="topbar" id="topbar" style="display:none">
   <div class="left">
+    <button class="nav-btn" id="btn-hamburger" title="sessions" style="font-size:18px;padding:4px 10px">☰</button>
     <div class="logo">upend</div>
     <div class="nav">
       <button class="nav-btn active" id="btn-data">data</button>
@@ -215,9 +282,23 @@
     </div>
   </div>
   <div class="right">
+    <span class="session-label" id="session-label">no session</span>
+    <div class="status" id="topbar-status">
+      <span class="dot" id="topbar-dot"></span>
+      <span id="topbar-status-text"></span>
+    </div>
+    <button class="btn" id="btn-commit" style="display:none;color:var(--green);border-color:var(--green)">commit</button>
     <span class="user-info" id="user-info"></span>
     <button class="btn" id="logout-btn">logout</button>
   </div>
+</div>
+
+<div class="sessions-drawer" id="sessions-drawer">
+  <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
+    <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted)">sessions</span>
+    <button id="btn-new-session" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:4px;font-family:inherit;font-size:11px;cursor:pointer">+ new</button>
+  </div>
+  <div id="sessions-list" style="padding:0 8px;flex:1;overflow-y:auto"></div>
 </div>
 
 <div class="panels" id="panels" style="display:none">
@@ -300,6 +381,22 @@ function loadIframes() {
   iframesLoaded = true;
   document.getElementById('iframe-claude').src = CLAUDE_URL + '?token=' + encodeURIComponent(token);
   showData();
+
+  // restore saved session after iframe is ready
+  if (store.currentSessionId) {
+    const id = store.currentSessionId;
+    const frame = document.getElementById('iframe-claude');
+    const tryRestore = setInterval(() => {
+      try {
+        if (frame.contentWindow?.openSession) {
+          clearInterval(tryRestore);
+          store.openSession(id);
+        }
+      } catch {}
+    }, 200);
+    // give up after 10s
+    setTimeout(() => clearInterval(tryRestore), 10000);
+  }
 }
 
 // ---------- right panel switching ----------
@@ -383,6 +480,125 @@ function createNewApp() {
   }, '*');
 }
 
+// ---------- session controls ----------
+
+const claudeFrame = () => document.getElementById('iframe-claude');
+
+// simple store — dashboard owns session state
+window.store = {
+  sessions: [],
+  currentSessionId: localStorage.getItem('upend_dashboard_session') ? Number(localStorage.getItem('upend_dashboard_session')) : null,
+  status: 'ready',
+
+  async loadSessions() {
+    try {
+      const res = await fetch('/claude/sessions', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      this.sessions = await res.json();
+      this.renderDrawer();
+    } catch (err) {
+      console.error('[store] loadSessions:', err);
+    }
+  },
+
+  renderDrawer() {
+    const list = document.getElementById('sessions-list');
+    if (!list) return;
+    const active = this.sessions.filter(s => s.status === 'active');
+    list.innerHTML = active.map(s => `
+      <div class="session-item ${s.id == this.currentSessionId ? 'active' : ''}"
+           onclick="store.openSession(${s.id})">
+        ${s.prompt.slice(0, 50)}
+      </div>
+    `).join('') || '<div style="padding:12px;color:var(--muted);font-size:11px">no active sessions</div>';
+  },
+
+  openSession(id) {
+    this.currentSessionId = id;
+    localStorage.setItem('upend_dashboard_session', id);
+    const s = this.sessions.find(s => s.id == id);
+    document.getElementById('session-label').textContent = s?.prompt?.slice(0, 40) || `#${id}`;
+    document.getElementById('btn-commit').style.display = '';
+    document.getElementById('sessions-drawer').classList.remove('open');
+    // call the iframe's function directly (same origin through Caddy)
+    try {
+      claudeFrame()?.contentWindow?.openSession(id);
+    } catch (err) {
+      console.error('[store] openSession failed:', err);
+    }
+    this.renderDrawer();
+  },
+
+  newSession() {
+    this.currentSessionId = null;
+    localStorage.removeItem('upend_dashboard_session');
+    document.getElementById('session-label').textContent = 'new session';
+    document.getElementById('btn-commit').style.display = 'none';
+    document.getElementById('sessions-drawer').classList.remove('open');
+    try {
+      const w = claudeFrame()?.contentWindow;
+      if (w?.currentSessionId !== undefined) {
+        w.currentSessionId = null;
+        w.localStorage.removeItem('upend_session');
+        w.document.getElementById('messages').innerHTML = '';
+        w.document.getElementById('chat-input')?.focus();
+      }
+    } catch (err) {
+      console.error('[store] newSession failed:', err);
+    }
+  },
+};
+
+document.getElementById('btn-hamburger').onclick = () => {
+  const drawer = document.getElementById('sessions-drawer');
+  drawer.classList.toggle('open');
+  if (drawer.classList.contains('open')) store.loadSessions();
+};
+
+document.getElementById('btn-new-session').onclick = () => store.newSession();
+
+document.getElementById('btn-commit').onclick = () => {
+  if (confirm('Commit this session? (ends the session, changes stay as-is)')) {
+    claudeFrame()?.contentWindow?.postMessage({ type: 'upend:end-session' }, '*');
+    document.getElementById('btn-commit').style.display = 'none';
+    document.getElementById('session-label').textContent = 'committed';
+    store.currentSessionId = null;
+    store.loadSessions();
+  }
+};
+
+// listen for session state from chat iframe
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'upend:session-changed') {
+    store.currentSessionId = e.data.sessionId;
+    const label = document.getElementById('session-label');
+    const commitBtn = document.getElementById('btn-commit');
+    if (e.data.sessionId) {
+      label.textContent = e.data.prompt ? e.data.prompt.slice(0, 40) : `session #${e.data.sessionId}`;
+      commitBtn.style.display = (e.data.status === 'active') ? '' : 'none';
+    } else {
+      label.textContent = 'no session';
+      commitBtn.style.display = 'none';
+    }
+    store.loadSessions();
+  }
+
+  if (e.data?.type === 'upend:status') {
+    const dot = document.getElementById('topbar-dot');
+    const text = document.getElementById('topbar-status-text');
+    if (dot) dot.className = `dot ${e.data.state}`;
+    if (text) text.textContent = e.data.text;
+  }
+
+  if (e.data?.type === 'upend:turn-complete') {
+    const iframe = document.getElementById('right-iframe');
+    if (iframe?.src) iframe.src = iframe.src;
+    loadApps();
+  }
+});
+
 // ---------- resizer ----------
 
 const resizer = document.getElementById('resizer');
@@ -407,17 +623,6 @@ document.addEventListener('mouseup', () => {
   isResizing = false;
   document.body.style.cursor = '';
   document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = '');
-});
-
-// ---------- refresh on claude turn complete ----------
-
-window.addEventListener('message', (e) => {
-  if (e.data?.type === 'upend:turn-complete') {
-    console.log('[dashboard] turn complete, refreshing right panel');
-    const iframe = document.getElementById('right-iframe');
-    if (iframe?.src) iframe.src = iframe.src;
-    loadApps();
-  }
 });
 
 // ---------- init ----------

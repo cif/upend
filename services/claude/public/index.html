@@ -417,6 +417,8 @@ function renderLogin() {
   };
 }
 
+const isEmbedded = window.parent !== window;
+
 function renderChat() {
   document.getElementById('app').innerHTML = `
     <div class="sidebar" id="sidebar">
@@ -427,6 +429,7 @@ function renderChat() {
       <div class="session-list" id="session-list"></div>
     </div>
     <div class="main">
+      ${isEmbedded ? '' : `
       <header>
         <div style="display:flex;align-items:center;gap:12px">
           <button class="hamburger" id="sidebar-toggle">☰</button>
@@ -436,12 +439,12 @@ function renderChat() {
           <span id="status-text">ready</span>
           <span class="dot" id="status-dot"></span>
         </div>
-      </header>
+      </header>`}
       <div id="snapshot-banner"></div>
       <div class="messages" id="messages">
         <div class="message">
           <div class="role system">system</div>
-          <div class="content">start a new session or pick one from the sidebar. claude has full access to the codebase — edits go live.</div>
+          <div class="content">start a new session or tell claude what to build.</div>
         </div>
       </div>
       <div class="input-area">
@@ -449,7 +452,7 @@ function renderChat() {
           <textarea id="chat-input" placeholder="tell claude what to do..." rows="1"></textarea>
           <button type="submit" id="send-btn">send</button>
         </form>
-        <div class="hint">shift+enter for newline — claude can edit files, run commands, and restart services</div>
+        <div class="hint">shift+enter for newline</div>
       </div>
     </div>
   `;
@@ -550,6 +553,7 @@ async function createSession(prompt, force = false) {
 
     currentSessionId = Number(data.session.id);
     localStorage.setItem('upend_session', currentSessionId);
+    notifyParent('session-changed', { sessionId: currentSessionId, prompt: prompt, status: 'active' });
 
     document.getElementById('snapshot-banner').innerHTML = `
       <div class="snapshot-banner">
@@ -716,12 +720,17 @@ function setStatus(state, text) {
   const label = document.getElementById('status-text');
   if (dot) dot.className = `dot ${state}`;
   if (label) label.textContent = text;
+  notifyParent('status', { state, text });
 }
 
 async function loadSessions() {
   try {
+    console.log('[chat] loadSessions, token:', token ? 'yes' : 'NO', 'API_BASE:', API_BASE);
     const res = await fetch(API_BASE + '/sessions', { headers: headers() });
+    console.log('[chat] loadSessions response:', res.status);
+    if (!res.ok) { console.error('[chat] loadSessions failed:', res.status); return; }
     const sessions = await res.json();
+    console.log('[chat] sessions:', sessions.length, 'active:', sessions.filter(s => s.status === 'active').length);
     const list = document.getElementById('session-list');
     if (!list) return;
     list.innerHTML = sessions
@@ -732,7 +741,9 @@ async function loadSessions() {
           ${escapeHtml(s.prompt.slice(0, 60))}
         </div>
       `).join('') || '<div style="padding:12px;color:var(--muted);font-size:11px">no active sessions</div>';
-  } catch {}
+  } catch (err) {
+    console.error('[chat] loadSessions error:', err);
+  }
 }
 
 window.openSession = async (id) => {
@@ -826,17 +837,51 @@ function escapeHtml(str) {
 
 render();
 
-// listen for prompts from parent dashboard (e.g. "create new app")
+// notify parent of session state
+function notifyParent(type, data = {}) {
+  if (isEmbedded) {
+    window.parent.postMessage({ type: `upend:${type}`, ...data }, '*');
+  }
+}
+
+// listen for commands from parent dashboard
 window.addEventListener('message', (e) => {
   if (e.data?.type === 'upend:send-prompt' && e.data.prompt) {
-    const prompt = e.data.prompt;
-    // add to chat and send
-    addMessage('user', prompt);
+    addMessage('user', e.data.prompt);
     if (!currentSessionId) {
-      createSession(prompt);
+      createSession(e.data.prompt);
     } else {
-      sendMessage(prompt);
+      sendMessage(e.data.prompt);
     }
+  }
+
+  if (e.data?.type === 'upend:toggle-sidebar') {
+    document.getElementById('sidebar')?.classList.toggle('open');
+  }
+
+  if (e.data?.type === 'upend:open-session' && e.data.sessionId) {
+    console.log('[chat] received open-session:', e.data.sessionId);
+    openSession(e.data.sessionId);
+  }
+
+  if (e.data?.type === 'upend:new-session') {
+    currentSessionId = null;
+    localStorage.removeItem('upend_session');
+    if (ws) { ws.close(); ws = null; }
+    document.getElementById('messages').innerHTML = '';
+    document.getElementById('snapshot-banner').innerHTML = '';
+    document.getElementById('chat-input')?.focus();
+    notifyParent('session-changed', { sessionId: null, prompt: null, status: null });
+  }
+
+  if (e.data?.type === 'upend:end-session' && currentSessionId) {
+    fetch(API_BASE + `/sessions/${currentSessionId}/end`, {
+      method: 'POST', headers: headers(),
+    }).then(() => {
+      addMessage('system', 'session committed.');
+      notifyParent('session-changed', { sessionId: currentSessionId, status: 'ended' });
+      loadSessions();
+    });
   }
 });
 </script>

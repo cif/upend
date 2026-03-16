@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>crm</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0a; color: #e5e5e5; font-family: monospace; min-height: 100vh; }
+
+    /* Login */
+    #login-screen { display: flex; align-items: center; justify-content: center; height: 100vh; }
+    #login-box { display: flex; flex-direction: column; gap: 12px; width: 320px; }
+    #login-box h1 { color: #f97316; font-size: 1.4em; }
+
+    input, select {
+      background: #111; border: 1px solid #333; color: #e5e5e5;
+      font-family: monospace; font-size: 0.9em; padding: 8px 10px; width: 100%; outline: none;
+    }
+    input:focus, select:focus { border-color: #f97316; }
+    input::placeholder { color: #444; }
+
+    button {
+      background: #f97316; color: #0a0a0a; border: none; font-family: monospace;
+      font-size: 0.9em; font-weight: bold; padding: 8px 14px; cursor: pointer;
+    }
+    button:hover { background: #ea6a0a; }
+    button.ghost { background: transparent; color: #f97316; border: 1px solid #f97316; font-weight: normal; }
+    button.ghost:hover { background: #f973161a; }
+    button.danger { background: transparent; color: #ef4444; border: 1px solid #2a2a2a; font-weight: normal; }
+    button.danger:hover { border-color: #ef4444; }
+    button.sm { padding: 4px 10px; font-size: 0.8em; }
+
+    /* Layout */
+    #app { display: none; }
+    #topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px; border-bottom: 1px solid #1a1a1a;
+    }
+    #topbar h1 { color: #f97316; font-size: 1.2em; }
+    #tabs { display: flex; gap: 0; }
+    .tab {
+      padding: 8px 20px; cursor: pointer; color: #555; border-bottom: 2px solid transparent;
+      font-family: monospace; font-size: 0.9em;
+    }
+    .tab:hover { color: #e5e5e5; }
+    .tab.active { color: #f97316; border-bottom-color: #f97316; }
+
+    #content { padding: 28px; max-width: 1000px; margin: 0 auto; }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 12px;
+    }
+    .toolbar input { max-width: 260px; }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+    th {
+      text-align: left; color: #555; font-weight: normal;
+      padding: 6px 12px; border-bottom: 1px solid #222;
+    }
+    td { padding: 9px 12px; border-bottom: 1px solid #181818; vertical-align: middle; }
+    tr:hover td { background: #0f0f0f; }
+    .muted { color: #555; }
+    .actions { display: flex; gap: 6px; }
+
+    /* Modal */
+    .overlay {
+      display: none; position: fixed; inset: 0; background: #0a0a0acc;
+      align-items: center; justify-content: center; z-index: 100;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: #111; border: 1px solid #2a2a2a; padding: 24px; width: 460px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .modal h2 { color: #f97316; font-size: 1.05em; }
+    .field label { color: #666; font-size: 0.78em; display: block; margin-bottom: 5px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+
+    .err { color: #ef4444; font-size: 0.82em; min-height: 1em; }
+    .empty { color: #444; padding: 28px 12px; }
+    .tag { background: #1a1a1a; color: #888; padding: 2px 8px; font-size: 0.78em; }
+  </style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-screen">
+  <div id="login-box">
+    <h1>crm</h1>
+    <input id="email" type="email" placeholder="email">
+    <input id="password" type="password" placeholder="password">
+    <div id="login-err" class="err"></div>
+    <button onclick="login()">login</button>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <div id="topbar">
+    <h1>crm</h1>
+    <div id="tabs">
+      <div class="tab active" onclick="switchTab('accounts')">accounts</div>
+      <div class="tab" onclick="switchTab('contacts')">contacts</div>
+      <div class="tab" onclick="switchTab('reps')">reps</div>
+    </div>
+    <button class="ghost" style="font-size:0.8em;padding:5px 12px" onclick="logout()">logout</button>
+  </div>
+
+  <div id="content">
+    <div id="err" class="err" style="margin-bottom:12px"></div>
+
+    <!-- Accounts -->
+    <div id="panel-accounts" class="panel active">
+      <div class="toolbar">
+        <input id="search-accounts" placeholder="search accounts..." oninput="filterAccounts()">
+        <button onclick="openModal('account')">+ account</button>
+      </div>
+      <table>
+        <thead><tr><th>name</th><th>industry</th><th>website</th><th>rep</th><th></th></tr></thead>
+        <tbody id="accounts-list"></tbody>
+      </table>
+    </div>
+
+    <!-- Contacts -->
+    <div id="panel-contacts" class="panel">
+      <div class="toolbar">
+        <input id="search-contacts" placeholder="search contacts..." oninput="filterContacts()">
+        <button onclick="openModal('contact')">+ contact</button>
+      </div>
+      <table>
+        <thead><tr><th>name</th><th>title</th><th>email</th><th>phone</th><th>account</th><th></th></tr></thead>
+        <tbody id="contacts-list"></tbody>
+      </table>
+    </div>
+
+    <!-- Reps -->
+    <div id="panel-reps" class="panel">
+      <div class="toolbar">
+        <span style="color:#555;font-size:0.88em">sales reps</span>
+        <button onclick="openModal('rep')">+ rep</button>
+      </div>
+      <table>
+        <thead><tr><th>name</th><th>email</th><th>accounts</th><th></th></tr></thead>
+        <tbody id="reps-list"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Account Modal -->
+<div id="modal-account" class="overlay" onclick="if(event.target===this)closeModal('account')">
+  <div class="modal">
+    <h2 id="account-modal-title">new account</h2>
+    <input type="hidden" id="account-id">
+    <div class="field"><label>company name *</label><input id="account-name"></div>
+    <div class="grid2">
+      <div class="field"><label>industry</label><input id="account-industry" placeholder="e.g. SaaS, Retail"></div>
+      <div class="field"><label>website</label><input id="account-website" placeholder="https://..."></div>
+    </div>
+    <div class="field"><label>assigned rep</label>
+      <select id="account-rep"><option value="">— unassigned —</option></select>
+    </div>
+    <div class="modal-footer">
+      <button class="ghost" onclick="closeModal('account')">cancel</button>
+      <button onclick="saveAccount()">save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Contact Modal -->
+<div id="modal-contact" class="overlay" onclick="if(event.target===this)closeModal('contact')">
+  <div class="modal">
+    <h2 id="contact-modal-title">new contact</h2>
+    <input type="hidden" id="contact-id">
+    <div class="grid2">
+      <div class="field"><label>first name *</label><input id="contact-first"></div>
+      <div class="field"><label>last name</label><input id="contact-last"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>email</label><input id="contact-email" type="email"></div>
+      <div class="field"><label>phone</label><input id="contact-phone" type="tel"></div>
+    </div>
+    <div class="field"><label>title</label><input id="contact-title" placeholder="e.g. VP of Engineering"></div>
+    <div class="field"><label>account</label>
+      <select id="contact-account"><option value="">— no account —</option></select>
+    </div>
+    <div class="modal-footer">
+      <button class="ghost" onclick="closeModal('contact')">cancel</button>
+      <button onclick="saveContact()">save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rep Modal -->
+<div id="modal-rep" class="overlay" onclick="if(event.target===this)closeModal('rep')">
+  <div class="modal">
+    <h2 id="rep-modal-title">new rep</h2>
+    <input type="hidden" id="rep-id">
+    <div class="field"><label>name *</label><input id="rep-name"></div>
+    <div class="field"><label>email *</label><input id="rep-email" type="email"></div>
+    <div class="modal-footer">
+      <button class="ghost" onclick="closeModal('rep')">cancel</button>
+      <button onclick="saveRep()">save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API = '/api/data';
+  let token = localStorage.getItem('upend_token');
+  let allAccounts = [], allContacts = [], allReps = [];
+
+  function h(s) { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function headers(extra={}) {
+    return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...extra };
+  }
+
+  // --- Auth ---
+  async function login() {
+    document.getElementById('login-err').textContent = '';
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'login failed');
+      token = d.token;
+      localStorage.setItem('upend_token', token);
+      showApp();
+    } catch(e) { document.getElementById('login-err').textContent = e.message; }
+  }
+
+  function logout() {
+    localStorage.removeItem('upend_token'); token = null;
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'flex';
+  }
+
+  function showApp() {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    loadAll();
+  }
+
+  // --- Data ---
+  async function loadAll() {
+    await Promise.all([loadReps(), loadAccounts(), loadContacts()]);
+  }
+
+  async function loadReps() {
+    const res = await fetch(`${API}/reps?order=name`, { headers: headers() });
+    if (res.status === 401) { logout(); return; }
+    allReps = await res.json();
+    renderReps();
+    populateRepSelects();
+  }
+
+  async function loadAccounts() {
+    const res = await fetch(`${API}/accounts?order=name`, { headers: headers() });
+    allAccounts = await res.json();
+    renderAccounts();
+    populateAccountSelects();
+  }
+
+  async function loadContacts() {
+    const res = await fetch(`${API}/contacts?order=last_name,first_name`, { headers: headers() });
+    allContacts = await res.json();
+    renderContacts();
+  }
+
+  // --- Render ---
+  function repName(id) {
+    const r = allReps.find(r => r.id == id);
+    return r ? h(r.name) : '<span class="muted">—</span>';
+  }
+  function accountName(id) {
+    const a = allAccounts.find(a => a.id == id);
+    return a ? h(a.name) : '<span class="muted">—</span>';
+  }
+  function accountCount(repId) {
+    return allAccounts.filter(a => a.rep_id == repId).length;
+  }
+
+  function renderAccounts(list) {
+    list = list ?? allAccounts;
+    const tbody = document.getElementById('accounts-list');
+    if (!list.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">no accounts</td></tr>'; return; }
+    tbody.innerHTML = list.map(a => `<tr>
+      <td><strong>${h(a.name)}</strong></td>
+      <td>${a.industry ? `<span class="tag">${h(a.industry)}</span>` : '<span class="muted">—</span>'}</td>
+      <td>${a.website ? `<a href="${h(a.website)}" target="_blank" style="color:#f97316;text-decoration:none">${h(a.website)}</a>` : '<span class="muted">—</span>'}</td>
+      <td>${repName(a.rep_id)}</td>
+      <td class="actions">
+        <button class="ghost sm" onclick='editAccount(${a.id})'>edit</button>
+        <button class="danger sm" onclick="deleteAccount(${a.id})">del</button>
+      </td>
+    </tr>`).join('');
+  }
+
+  function renderContacts(list) {
+    list = list ?? allContacts;
+    const tbody = document.getElementById('contacts-list');
+    if (!list.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">no contacts</td></tr>'; return; }
+    tbody.innerHTML = list.map(c => `<tr>
+      <td><strong>${h(c.first_name)} ${h(c.last_name||'')}</strong></td>
+      <td class="muted">${h(c.title||'—')}</td>
+      <td>${c.email ? `<a href="mailto:${h(c.email)}" style="color:#f97316;text-decoration:none">${h(c.email)}</a>` : '<span class="muted">—</span>'}</td>
+      <td class="muted">${h(c.phone||'—')}</td>
+      <td>${accountName(c.account_id)}</td>
+      <td class="actions">
+        <button class="ghost sm" onclick='editContact(${c.id})'>edit</button>
+        <button class="danger sm" onclick="deleteContact(${c.id})">del</button>
+      </td>
+    </tr>`).join('');
+  }
+
+  function renderReps() {
+    const tbody = document.getElementById('reps-list');
+    if (!allReps.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">no reps</td></tr>'; return; }
+    tbody.innerHTML = allReps.map(r => `<tr>
+      <td><strong>${h(r.name)}</strong></td>
+      <td class="muted">${h(r.email)}</td>
+      <td class="muted">${accountCount(r.id)} account${accountCount(r.id)===1?'':'s'}</td>
+      <td class="actions">
+        <button class="ghost sm" onclick='editRep(${r.id})'>edit</button>
+        <button class="danger sm" onclick="deleteRep(${r.id})">del</button>
+      </td>
+    </tr>`).join('');
+  }
+
+  // --- Search ---
+  function filterAccounts() {
+    const q = document.getElementById('search-accounts').value.toLowerCase();
+    renderAccounts(allAccounts.filter(a =>
+      a.name.toLowerCase().includes(q) ||
+      (a.industry||'').toLowerCase().includes(q) ||
+      (a.website||'').toLowerCase().includes(q)
+    ));
+  }
+
+  function filterContacts() {
+    const q = document.getElementById('search-contacts').value.toLowerCase();
+    renderContacts(allContacts.filter(c =>
+      (c.first_name||'').toLowerCase().includes(q) ||
+      (c.last_name||'').toLowerCase().includes(q) ||
+      (c.email||'').toLowerCase().includes(q) ||
+      (c.title||'').toLowerCase().includes(q)
+    ));
+  }
+
+  // --- Selects ---
+  function populateRepSelects() {
+    const sel = document.getElementById('account-rep');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— unassigned —</option>' +
+      allReps.map(r => `<option value="${r.id}">${h(r.name)}</option>`).join('');
+    sel.value = cur;
+  }
+
+  function populateAccountSelects() {
+    const sel = document.getElementById('contact-account');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— no account —</option>' +
+      allAccounts.map(a => `<option value="${a.id}">${h(a.name)}</option>`).join('');
+    sel.value = cur;
+  }
+
+  // --- Tabs ---
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById(`panel-${name}`).classList.add('active');
+  }
+
+  // --- Modals ---
+  function openModal(type) {
+    clearModal(type);
+    document.getElementById(`modal-${type}`).classList.add('open');
+    setTimeout(() => document.querySelector(`#modal-${type} input:not([type=hidden])`).focus(), 50);
+  }
+
+  function closeModal(type) {
+    document.getElementById(`modal-${type}`).classList.remove('open');
+  }
+
+  function clearModal(type) {
+    if (type === 'account') {
+      document.getElementById('account-modal-title').textContent = 'new account';
+      document.getElementById('account-id').value = '';
+      document.getElementById('account-name').value = '';
+      document.getElementById('account-industry').value = '';
+      document.getElementById('account-website').value = '';
+      document.getElementById('account-rep').value = '';
+    } else if (type === 'contact') {
+      document.getElementById('contact-modal-title').textContent = 'new contact';
+      document.getElementById('contact-id').value = '';
+      document.getElementById('contact-first').value = '';
+      document.getElementById('contact-last').value = '';
+      document.getElementById('contact-email').value = '';
+      document.getElementById('contact-phone').value = '';
+      document.getElementById('contact-title').value = '';
+      document.getElementById('contact-account').value = '';
+    } else if (type === 'rep') {
+      document.getElementById('rep-modal-title').textContent = 'new rep';
+      document.getElementById('rep-id').value = '';
+      document.getElementById('rep-name').value = '';
+      document.getElementById('rep-email').value = '';
+    }
+  }
+
+  // --- Accounts CRUD ---
+  function editAccount(id) {
+    const a = allAccounts.find(a => a.id === id);
+    document.getElementById('account-modal-title').textContent = 'edit account';
+    document.getElementById('account-id').value = a.id;
+    document.getElementById('account-name').value = a.name;
+    document.getElementById('account-industry').value = a.industry || '';
+    document.getElementById('account-website').value = a.website || '';
+    document.getElementById('account-rep').value = a.rep_id || '';
+    document.getElementById('modal-account').classList.add('open');
+  }
+
+  async function saveAccount() {
+    const id = document.getElementById('account-id').value;
+    const name = document.getElementById('account-name').value.trim();
+    if (!name) return;
+    const payload = {
+      name,
+      industry: document.getElementById('account-industry').value.trim() || null,
+      website: document.getElementById('account-website').value.trim() || null,
+      rep_id: document.getElementById('account-rep').value || null,
+    };
+    try {
+      if (id) {
+        const res = await fetch(`${API}/accounts?id=eq.${id}`, {
+          method: 'PATCH', headers: headers({'Prefer':'return=representation'}), body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } else {
+        // Get user id from token for owner_id
+        const sub = JSON.parse(atob(token.split('.')[1])).sub;
+        const res = await fetch(`${API}/accounts`, {
+          method: 'POST', headers: headers({'Prefer':'return=representation'}),
+          body: JSON.stringify({ ...payload, owner_id: sub })
+        });
+        if (!res.ok) throw new Error(await res.text());
+      }
+      closeModal('account');
+      await loadAccounts();
+      renderReps();
+    } catch(e) { setErr(e.message); }
+  }
+
+  async function deleteAccount(id) {
+    if (!confirm('delete this account?')) return;
+    const res = await fetch(`${API}/accounts?id=eq.${id}`, { method: 'DELETE', headers: headers() });
+    if (!res.ok) { setErr(await res.text()); return; }
+    await loadAccounts();
+    renderReps();
+  }
+
+  // --- Contacts CRUD ---
+  function editContact(id) {
+    const c = allContacts.find(c => c.id === id);
+    document.getElementById('contact-modal-title').textContent = 'edit contact';
+    document.getElementById('contact-id').value = c.id;
+    document.getElementById('contact-first').value = c.first_name;
+    document.getElementById('contact-last').value = c.last_name || '';
+    document.getElementById('contact-email').value = c.email || '';
+    document.getElementById('contact-phone').value = c.phone || '';
+    document.getElementById('contact-title').value = c.title || '';
+    document.getElementById('contact-account').value = c.account_id || '';
+    document.getElementById('modal-contact').classList.add('open');
+  }
+
+  async function saveContact() {
+    const id = document.getElementById('contact-id').value;
+    const first_name = document.getElementById('contact-first').value.trim();
+    if (!first_name) return;
+    const payload = {
+      first_name,
+      last_name: document.getElementById('contact-last').value.trim() || null,
+      email: document.getElementById('contact-email').value.trim() || null,
+      phone: document.getElementById('contact-phone').value.trim() || null,
+      title: document.getElementById('contact-title').value.trim() || null,
+      account_id: document.getElementById('contact-account').value || null,
+    };
+    try {
+      if (id) {
+        const res = await fetch(`${API}/contacts?id=eq.${id}`, {
+          method: 'PATCH', headers: headers({'Prefer':'return=representation'}), body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } else {
+        const sub = JSON.parse(atob(token.split('.')[1])).sub;
+        const res = await fetch(`${API}/contacts`, {
+          method: 'POST', headers: headers({'Prefer':'return=representation'}),
+          body: JSON.stringify({ ...payload, owner_id: sub })
+        });
+        if (!res.ok) throw new Error(await res.text());
+      }
+      closeModal('contact');
+      await loadContacts();
+    } catch(e) { setErr(e.message); }
+  }
+
+  async function deleteContact(id) {
+    if (!confirm('delete this contact?')) return;
+    const res = await fetch(`${API}/contacts?id=eq.${id}`, { method: 'DELETE', headers: headers() });
+    if (!res.ok) { setErr(await res.text()); return; }
+    loadContacts();
+  }
+
+  // --- Reps CRUD ---
+  function editRep(id) {
+    const r = allReps.find(r => r.id === id);
+    document.getElementById('rep-modal-title').textContent = 'edit rep';
+    document.getElementById('rep-id').value = r.id;
+    document.getElementById('rep-name').value = r.name;
+    document.getElementById('rep-email').value = r.email;
+    document.getElementById('modal-rep').classList.add('open');
+  }
+
+  async function saveRep() {
+    const id = document.getElementById('rep-id').value;
+    const name = document.getElementById('rep-name').value.trim();
+    const email = document.getElementById('rep-email').value.trim();
+    if (!name || !email) return;
+    try {
+      if (id) {
+        const res = await fetch(`${API}/reps?id=eq.${id}`, {
+          method: 'PATCH', headers: headers({'Prefer':'return=representation'}),
+          body: JSON.stringify({ name, email })
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } else {
+        const res = await fetch(`${API}/reps`, {
+          method: 'POST', headers: headers({'Prefer':'return=representation'}),
+          body: JSON.stringify({ name, email })
+        });
+        if (!res.ok) throw new Error(await res.text());
+      }
+      closeModal('rep');
+      await loadReps();
+    } catch(e) { setErr(e.message); }
+  }
+
+  async function deleteRep(id) {
+    if (!confirm('delete this rep? their accounts will become unassigned.')) return;
+    const res = await fetch(`${API}/reps?id=eq.${id}`, { method: 'DELETE', headers: headers() });
+    if (!res.ok) { setErr(await res.text()); return; }
+    await loadAll();
+  }
+
+  function setErr(msg) {
+    const el = document.getElementById('err');
+    el.textContent = msg;
+    setTimeout(() => el.textContent = '', 5000);
+  }
+
+  // Init
+  if (token) showApp();
+
+  document.getElementById('password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') login();
+  });
+</script>
+</body>
+</html>

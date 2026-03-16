@@ -29,116 +29,109 @@
       overflow: hidden;
     }
 
-    /* ---------- top bar ---------- */
     .topbar {
-      height: 44px;
+      height: 40px;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 16px;
+      padding: 0 12px;
       flex-shrink: 0;
       z-index: 100;
     }
 
-    .topbar .left {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
+    .topbar .left { display: flex; align-items: center; gap: 12px; }
 
     .topbar .logo {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
       color: var(--accent);
       letter-spacing: -0.5px;
     }
 
-    .topbar .tabs {
-      display: flex;
-      gap: 2px;
-    }
+    .topbar .nav { display: flex; gap: 2px; }
 
-    .topbar .tab {
-      padding: 6px 14px;
-      font-size: 12px;
+    .topbar .nav-btn {
+      padding: 5px 12px;
+      font-size: 11px;
       color: var(--muted);
       background: none;
       border: none;
-      border-radius: 6px;
+      border-radius: 4px;
       cursor: pointer;
       font-family: inherit;
-      transition: all 0.15s;
-    }
-
-    .topbar .tab:hover { color: var(--text); background: var(--border); }
-    .topbar .tab.active { color: var(--accent); background: var(--accent-dim); }
-
-    .topbar .right {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .topbar .apps-dropdown {
       position: relative;
     }
 
-    .topbar .apps-menu {
+    .topbar .nav-btn:hover { color: var(--text); background: var(--border); }
+    .topbar .nav-btn.active { color: var(--accent); background: var(--accent-dim); }
+
+    .topbar .right { display: flex; align-items: center; gap: 10px; }
+    .topbar .user-info { font-size: 11px; color: var(--muted); }
+
+    .topbar .btn {
+      padding: 4px 10px;
+      font-size: 11px;
+      color: var(--muted);
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .topbar .btn:hover { color: var(--text); border-color: var(--muted); }
+
+    /* apps dropdown */
+    .dropdown { position: relative; }
+
+    .dropdown-menu {
       display: none;
       position: absolute;
       top: 100%;
-      right: 0;
+      left: 0;
       margin-top: 4px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      min-width: 200px;
+      border-radius: 6px;
+      min-width: 180px;
       padding: 4px;
       z-index: 200;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
     }
 
-    .topbar .apps-menu.open { display: block; }
+    .dropdown-menu.open { display: block; }
 
-    .topbar .apps-menu a {
-      display: block;
-      padding: 8px 12px;
-      color: var(--text);
-      text-decoration: none;
+    .dropdown-menu .item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-radius: 4px;
+      cursor: pointer;
       font-size: 12px;
-      border-radius: 6px;
+      color: var(--text);
     }
 
-    .topbar .apps-menu a:hover { background: var(--border); }
+    .dropdown-menu .item:hover { background: var(--border); }
+    .dropdown-menu .item.active { color: var(--accent); background: var(--accent-dim); }
 
-    .topbar .apps-menu .empty {
+    .dropdown-menu .item .popout {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 10px;
+      padding: 2px 6px;
+    }
+    .dropdown-menu .item .popout:hover { color: var(--text); }
+
+    .dropdown-menu .empty {
       padding: 12px;
       color: var(--muted);
       font-size: 11px;
       text-align: center;
     }
 
-    .topbar .user-info {
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .topbar .btn {
-      padding: 5px 12px;
-      font-size: 11px;
-      color: var(--muted);
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      cursor: pointer;
-      font-family: inherit;
-    }
-
-    .topbar .btn:hover { color: var(--text); border-color: var(--muted); }
-
-    /* ---------- panels ---------- */
+    /* panels */
     .panels {
       flex: 1;
       display: flex;
@@ -147,11 +140,8 @@
 
     .panel {
       flex: 1;
-      display: none;
       min-height: 0;
     }
-
-    .panel.visible { display: flex; }
 
     .panel iframe {
       width: 100%;
@@ -159,179 +149,49 @@
       border: none;
     }
 
-    /* split view */
-    .panels.split .panel.visible {
-      flex: 1;
-    }
-
-    .panels.split .panel.visible + .panel.visible {
-      border-left: 1px solid var(--border);
-    }
-
     .resizer {
       width: 4px;
       cursor: col-resize;
       background: var(--border);
-      display: none;
       flex-shrink: 0;
     }
-
-    .panels.split .resizer { display: block; }
     .resizer:hover { background: var(--accent); }
 
-    /* right panel tabs */
-    .right-tabs {
-      display: flex;
-      border-bottom: 1px solid var(--border);
-      background: var(--surface);
-      flex-shrink: 0;
-    }
+    #right-iframe { display: block; }
 
-    .rtab {
-      padding: 8px 16px;
-      font-size: 12px;
-      color: var(--muted);
-      background: none;
-      border: none;
-      border-bottom: 2px solid transparent;
-      cursor: pointer;
-      font-family: inherit;
-    }
-
-    .rtab:hover { color: var(--text); }
-    .rtab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
-    #panel-right {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .right-content {
-      flex: 1;
-      position: relative;
-      min-height: 0;
-    }
-
-    .right-frame {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      border: none;
-      display: none;
-    }
-
-    .right-frame.visible { display: block; }
-
-    .apps-list {
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      height: 100%;
-      overflow-y: auto;
-      background: var(--bg);
-    }
-
-    .apps-list .app-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--text);
-    }
-
-    .apps-list .app-item:hover { background: var(--border); }
-    .apps-list .app-item.active { background: var(--accent-dim); color: var(--accent); }
-
-    .apps-list .app-item .popout {
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 10px;
-      padding: 2px 6px;
-    }
-
-    .apps-list .app-item .popout:hover { color: var(--text); }
-
-    .apps-list .empty-msg {
-      color: var(--muted);
-      font-size: 11px;
-      text-align: center;
-      padding: 24px;
-    }
-
-    /* ---------- login overlay ---------- */
+    /* login */
     .login-overlay {
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       background: var(--bg);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       z-index: 1000;
     }
-
     .login-overlay.hidden { display: none; }
 
     .login-overlay form {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 32px;
-      width: 340px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      padding: 32px; width: 340px;
+      display: flex; flex-direction: column; gap: 12px;
     }
-
-    .login-overlay h2 {
-      font-size: 16px;
-      color: var(--accent);
-      margin-bottom: 4px;
-    }
-
+    .login-overlay h2 { font-size: 16px; color: var(--accent); margin-bottom: 4px; }
     .login-overlay input {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px 12px;
-      color: var(--text);
-      font-family: inherit;
-      font-size: 13px;
-      outline: none;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; color: var(--text); font-family: inherit; font-size: 13px; outline: none;
     }
-
     .login-overlay input:focus { border-color: var(--accent); }
-
     .login-overlay button[type="submit"] {
-      padding: 10px;
-      background: var(--accent);
-      color: #000;
-      border: none;
-      border-radius: 6px;
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
+      padding: 10px; background: var(--accent); color: #000; border: none;
+      border-radius: 6px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
     }
-
-    .login-overlay .toggle {
-      font-size: 12px;
-      color: var(--muted);
-      text-align: center;
-      cursor: pointer;
-    }
-
+    .login-overlay .toggle { font-size: 12px; color: var(--muted); text-align: center; cursor: pointer; }
     .login-overlay .toggle:hover { color: var(--text); }
     .login-overlay .error { color: var(--red); font-size: 12px; }
   </style>
 </head>
 <body>
 
-<!-- login overlay -->
 <div class="login-overlay" id="login-overlay">
   <form id="auth-form">
     <h2 id="auth-title">log in</h2>
@@ -343,10 +203,16 @@
   </form>
 </div>
 
-<!-- top bar -->
 <div class="topbar" id="topbar" style="display:none">
   <div class="left">
     <div class="logo">upend</div>
+    <div class="nav">
+      <button class="nav-btn active" id="btn-data">data</button>
+      <div class="dropdown">
+        <button class="nav-btn" id="btn-apps">apps ▾</button>
+        <div class="dropdown-menu" id="apps-menu"></div>
+      </div>
+    </div>
   </div>
   <div class="right">
     <span class="user-info" id="user-info"></span>
@@ -354,21 +220,13 @@
   </div>
 </div>
 
-<!-- panels: always split, claude left + right panel with tabs -->
-<div class="panels split" id="panels" style="display:none">
-  <div class="panel visible" id="panel-claude">
+<div class="panels" id="panels" style="display:none">
+  <div class="panel" id="panel-left">
     <iframe id="iframe-claude"></iframe>
   </div>
   <div class="resizer" id="resizer"></div>
-  <div class="panel visible" id="panel-right">
-    <div class="right-tabs">
-      <button class="rtab active" data-target="data">data</button>
-      <button class="rtab" data-target="apps">apps</button>
-    </div>
-    <div class="right-content" id="right-content">
-      <iframe id="iframe-studio" class="right-frame visible"></iframe>
-      <iframe id="iframe-app" class="right-frame"></iframe>
-    </div>
+  <div class="panel" id="panel-right">
+    <iframe id="right-iframe"></iframe>
   </div>
 </div>
 
@@ -380,6 +238,7 @@ const STUDIO_URL = 'https://local.drizzle.studio';
 let token = localStorage.getItem('upend_token');
 let userEmail = localStorage.getItem('upend_email');
 let isSignup = false;
+let currentView = 'data'; // 'data' or app name
 
 // ---------- auth ----------
 
@@ -399,22 +258,17 @@ document.getElementById('auth-toggle').onclick = () => {
   document.getElementById('auth-title').textContent = isSignup ? 'sign up' : 'log in';
   document.getElementById('auth-submit').textContent = isSignup ? 'sign up' : 'log in';
   document.getElementById('auth-toggle').textContent = isSignup
-    ? 'already have an account? log in'
-    : 'need an account? sign up';
+    ? 'already have an account? log in' : 'need an account? sign up';
 };
 
 document.getElementById('auth-form').onsubmit = async (e) => {
   e.preventDefault();
   const form = new FormData(e.target);
-  const endpoint = isSignup ? '/auth/signup' : '/auth/login';
   try {
-    const res = await fetch(API + endpoint, {
+    const res = await fetch(API + (isSignup ? '/auth/signup' : '/auth/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: form.get('email'),
-        password: form.get('password'),
-      }),
+      body: JSON.stringify({ email: form.get('email'), password: form.get('password') }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
@@ -429,8 +283,7 @@ document.getElementById('auth-form').onsubmit = async (e) => {
 };
 
 document.getElementById('logout-btn').onclick = () => {
-  token = null;
-  userEmail = null;
+  token = null; userEmail = null;
   localStorage.removeItem('upend_token');
   localStorage.removeItem('upend_email');
   document.getElementById('login-overlay').classList.remove('hidden');
@@ -445,88 +298,67 @@ let iframesLoaded = false;
 function loadIframes() {
   if (iframesLoaded) return;
   iframesLoaded = true;
-
-  // pass token to claude UI via URL param so it can auto-login
-  const claudeUrl = CLAUDE_URL + '?token=' + encodeURIComponent(token);
-  document.getElementById('iframe-claude').src = claudeUrl;
-  document.getElementById('iframe-studio').src = STUDIO_URL;
+  document.getElementById('iframe-claude').src = CLAUDE_URL + '?token=' + encodeURIComponent(token);
+  showData();
 }
 
-// ---------- right panel tabs ----------
+// ---------- right panel switching ----------
 
-let currentAppName = null;
-
-document.querySelectorAll('.rtab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.rtab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    showRightPanel(tab.dataset.target);
-  });
-});
-
-function showRightPanel(target) {
-  const studio = document.getElementById('iframe-studio');
-  const app = document.getElementById('iframe-app');
-
-  if (target === 'data') {
-    studio.classList.add('visible');
-    app.classList.remove('visible');
-  } else if (target === 'apps') {
-    studio.classList.remove('visible');
-    // if an app is loaded, show it. otherwise show the app list
-    if (currentAppName) {
-      app.classList.add('visible');
-    } else {
-      app.classList.add('visible');
-      app.srcdoc = buildAppList();
-    }
-  }
+function showData() {
+  currentView = 'data';
+  document.getElementById('right-iframe').src = STUDIO_URL;
+  document.getElementById('btn-data').classList.add('active');
+  document.getElementById('btn-apps').classList.remove('active');
 }
 
 function openApp(name) {
-  currentAppName = name;
-  const app = document.getElementById('iframe-app');
-  app.srcdoc = '';
-  app.src = `/apps/${name}/`;
-
-  // switch to apps tab
-  document.querySelectorAll('.rtab').forEach(t => t.classList.remove('active'));
-  document.querySelector('.rtab[data-target="apps"]').classList.add('active');
-  document.getElementById('iframe-studio').classList.remove('visible');
-  app.classList.add('visible');
-
-  loadApps(); // refresh list in case
+  currentView = name;
+  document.getElementById('right-iframe').src = `/apps/${name}/`;
+  document.getElementById('btn-data').classList.remove('active');
+  document.getElementById('btn-apps').classList.add('active');
+  document.getElementById('apps-menu').classList.remove('open');
 }
 
-function buildAppList() {
-  return `<!DOCTYPE html>
-    <html><head><style>
-      * { margin:0; padding:0; box-sizing:border-box; }
-      body { background:#0a0a0a; color:#e5e5e5; font-family:'SF Mono',monospace; padding:16px; }
-      .app { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-bottom:4px; }
-      .app:hover { background:#262626; }
-      .app .name { flex:1; }
-      .app .popout { color:#737373; text-decoration:none; font-size:11px; padding:4px 8px; }
-      .app .popout:hover { color:#e5e5e5; }
-      .empty { color:#737373; font-size:12px; text-align:center; padding:40px; }
-      h2 { font-size:12px; color:#737373; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:12px; }
-    </style></head><body>
-    <h2>apps</h2>
-    <div id="list"><div class="empty">loading...</div></div>
-    <script>
-      fetch('/claude/apps', { headers: { 'Authorization': 'Bearer ${token}' }})
-        .then(r => r.json())
-        .then(apps => {
-          const list = document.getElementById('list');
-          if (!apps.length) { list.innerHTML = '<div class="empty">no apps yet — tell claude to build one</div>'; return; }
-          list.innerHTML = apps.map(a =>
-            '<div class="app" onclick="parent.openApp(\\'' + a.name + '\\')">' +
-              '<span class="name">' + a.name + '</span>' +
-              '<a class="popout" href="/apps/' + a.name + '/" target="_blank" onclick="event.stopPropagation()">&#8599;</a>' +
-            '</div>'
-          ).join('');
-        });
-    <\/script></body></html>`;
+// ---------- nav clicks ----------
+
+document.getElementById('btn-data').onclick = () => showData();
+
+document.getElementById('btn-apps').onclick = (e) => {
+  e.stopPropagation();
+  document.getElementById('apps-menu').classList.toggle('open');
+  loadApps();
+};
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.dropdown')) {
+    document.getElementById('apps-menu').classList.remove('open');
+  }
+});
+
+// ---------- apps list ----------
+
+async function loadApps() {
+  try {
+    const res = await fetch('/claude/apps', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    const apps = await res.json();
+    const menu = document.getElementById('apps-menu');
+
+    if (!apps.length) {
+      menu.innerHTML = '<div class="empty">no apps yet — tell claude to build one</div>';
+      return;
+    }
+
+    menu.innerHTML = apps.map(app =>
+      `<div class="item ${currentView === app.name ? 'active' : ''}" onclick="openApp('${app.name}')">
+        <span>${app.name}</span>
+        <a class="popout" href="/apps/${app.name}/" target="_blank" onclick="event.stopPropagation()" title="open in new tab">&#8599;</a>
+      </div>`
+    ).join('');
+  } catch {
+    document.getElementById('apps-menu').innerHTML = '<div class="empty">failed to load</div>';
+  }
 }
 
 // ---------- resizer ----------
@@ -542,12 +374,10 @@ resizer.addEventListener('mousedown', () => {
 
 document.addEventListener('mousemove', (e) => {
   if (!isResizing) return;
-  const panels = document.getElementById('panels');
-  const rect = panels.getBoundingClientRect();
-  const pct = ((e.clientX - rect.left) / rect.width) * 100;
-  const clamped = Math.max(20, Math.min(80, pct));
-  document.getElementById('panel-claude').style.flex = `0 0 ${clamped}%`;
-  document.getElementById('panel-right').style.flex = `0 0 ${100 - clamped}%`;
+  const rect = document.getElementById('panels').getBoundingClientRect();
+  const pct = Math.max(20, Math.min(80, ((e.clientX - rect.left) / rect.width) * 100));
+  document.getElementById('panel-left').style.flex = `0 0 ${pct}%`;
+  document.getElementById('panel-right').style.flex = `0 0 ${100 - pct}%`;
 });
 
 document.addEventListener('mouseup', () => {
@@ -557,22 +387,13 @@ document.addEventListener('mouseup', () => {
   document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = '');
 });
 
-// ---------- apps list (for refresh) ----------
-
-async function loadApps() {
-  // just used to refresh the app list if it's showing
-  const app = document.getElementById('iframe-app');
-  if (app.classList.contains('visible') && !currentAppName) {
-    app.srcdoc = buildAppList();
-  }
-}
-
 // ---------- refresh on claude turn complete ----------
 
 window.addEventListener('message', (e) => {
   if (e.data?.type === 'upend:turn-complete') {
-    const studio = document.getElementById('iframe-studio');
-    if (studio?.src) studio.src = studio.src;
+    console.log('[dashboard] turn complete, refreshing right panel');
+    const iframe = document.getElementById('right-iframe');
+    if (iframe?.src) iframe.src = iframe.src;
     loadApps();
   }
 });

@@ -1,5 +1,13 @@
 :4000 {
-	# Live apps — served straight from filesystem, no process needed
+	# Neon Data API proxy — /api/data/* → PostgREST
+	handle_path /api/data/* {
+		reverse_proxy https://ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech {
+			header_up Host ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech
+			rewrite * /neondb/rest/v1{uri}
+		}
+	}
+
+	# Live apps
 	handle_path /apps/* {
 		root * apps
 		try_files {path} {path}/index.html
@@ -11,7 +19,7 @@
 		reverse_proxy localhost:4983
 	}
 
-	# API service
+	# API service (auth, webhooks, business logic)
 	handle_path /api/* {
 		reverse_proxy localhost:3001
 	}

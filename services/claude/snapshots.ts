@@ -31,9 +31,10 @@ export async function snapshot(projectRoot: string): Promise<string> {
   const rsyncExit = await rsync.exited;
   if (rsyncExit !== 0) throw new Error(`file snapshot failed`);
 
-  // 2. snapshot database via pg_dump
+  // 2. snapshot database via pg_dump (non-fatal if pg_dump is missing)
   const dbUrl = process.env.DATABASE_URL;
   if (dbUrl) {
+    try {
     const dumpFile = join(dest, "db.sql");
     const pgDump = Bun.spawn(
       ["pg_dump", "--no-owner", "--no-privileges", dbUrl],
@@ -48,6 +49,9 @@ export async function snapshot(projectRoot: string): Promise<string> {
     } else {
       const stderr = await new Response(pgDump.stderr).text();
       console.warn(`[snapshot] pg_dump failed (non-fatal): ${stderr}`);
+    }
+    } catch (err: any) {
+      console.warn(`[snapshot] pg_dump unavailable (non-fatal): ${err.message}`);
     }
   }
 

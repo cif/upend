@@ -26,6 +26,7 @@
     };
   </script>
   <style>
+    [x-cloak] { display: none !important; }
     @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     .dot-pulse { animation: pulse-dot 1s infinite; }
     /* hide scrollbar but allow scroll */
@@ -172,7 +173,7 @@
   <!-- right: iframe (studio or app) -->
   <div class="flex-1 min-h-0 min-w-0" id="panel-right">
     <iframe x-ref="rightIframe" class="w-full h-full border-none"
-      :src="rightPanel === 'data' ? studioUrl : '/apps/' + rightPanel + '/'"></iframe>
+      :src="token ? (rightPanel === 'data' ? studioUrl : '/apps/' + rightPanel + '/') : 'about:blank'"></iframe>
   </div>
 </div>
 
@@ -200,7 +201,9 @@ function dashboard() {
 
     // right panel
     rightPanel: 'data',
-    studioUrl: 'https://local.drizzle.studio',
+    studioUrl: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+      ? 'https://local.drizzle.studio'
+      : 'about:blank',
     apps: [],
     appsOpen: false,
 

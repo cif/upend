@@ -179,6 +179,90 @@
     .panels.split .resizer { display: block; }
     .resizer:hover { background: var(--accent); }
 
+    /* right panel tabs */
+    .right-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .rtab {
+      padding: 8px 16px;
+      font-size: 12px;
+      color: var(--muted);
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .rtab:hover { color: var(--text); }
+    .rtab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    #panel-right {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .right-content {
+      flex: 1;
+      position: relative;
+      min-height: 0;
+    }
+
+    .right-frame {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: none;
+    }
+
+    .right-frame.visible { display: block; }
+
+    .apps-list {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      height: 100%;
+      overflow-y: auto;
+      background: var(--bg);
+    }
+
+    .apps-list .app-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .apps-list .app-item:hover { background: var(--border); }
+    .apps-list .app-item.active { background: var(--accent-dim); color: var(--accent); }
+
+    .apps-list .app-item .popout {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 10px;
+      padding: 2px 6px;
+    }
+
+    .apps-list .app-item .popout:hover { color: var(--text); }
+
+    .apps-list .empty-msg {
+      color: var(--muted);
+      font-size: 11px;
+      text-align: center;
+      padding: 24px;
+    }
+
     /* ---------- login overlay ---------- */
     .login-overlay {
       position: fixed;
@@ -263,33 +347,28 @@
 <div class="topbar" id="topbar" style="display:none">
   <div class="left">
     <div class="logo">upend</div>
-    <div class="tabs">
-      <button class="tab active" data-panel="claude">claude</button>
-      <button class="tab" data-panel="studio">data</button>
-      <button class="tab" data-panel="split">split</button>
-    </div>
   </div>
   <div class="right">
-    <div class="apps-dropdown">
-      <button class="btn" id="apps-btn">apps</button>
-      <div class="apps-menu" id="apps-menu"></div>
-    </div>
     <span class="user-info" id="user-info"></span>
     <button class="btn" id="logout-btn">logout</button>
   </div>
 </div>
 
-<!-- panels -->
-<div class="panels" id="panels" style="display:none">
+<!-- panels: always split, claude left + right panel with tabs -->
+<div class="panels split" id="panels" style="display:none">
   <div class="panel visible" id="panel-claude">
     <iframe id="iframe-claude"></iframe>
   </div>
   <div class="resizer" id="resizer"></div>
-  <div class="panel" id="panel-studio">
-    <iframe id="iframe-studio"></iframe>
-  </div>
-  <div class="panel" id="panel-app">
-    <iframe id="iframe-app"></iframe>
+  <div class="panel visible" id="panel-right">
+    <div class="right-tabs">
+      <button class="rtab active" data-target="data">data</button>
+      <button class="rtab" data-target="apps">apps</button>
+    </div>
+    <div class="right-content" id="right-content">
+      <iframe id="iframe-studio" class="right-frame visible"></iframe>
+      <iframe id="iframe-app" class="right-frame"></iframe>
+    </div>
   </div>
 </div>
 
@@ -373,49 +452,81 @@ function loadIframes() {
   document.getElementById('iframe-studio').src = STUDIO_URL;
 }
 
-// ---------- tabs ----------
+// ---------- right panel tabs ----------
 
-function showPanel(panel) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  const activeTab = document.querySelector(`.tab[data-panel="${panel}"]`);
-  if (activeTab) activeTab.classList.add('active');
+let currentAppName = null;
 
-  const panelsEl = document.getElementById('panels');
-  const claudePanel = document.getElementById('panel-claude');
-  const studioPanel = document.getElementById('panel-studio');
-  const appPanel = document.getElementById('panel-app');
+document.querySelectorAll('.rtab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.rtab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    showRightPanel(tab.dataset.target);
+  });
+});
 
-  panelsEl.classList.remove('split');
-  claudePanel.classList.remove('visible');
-  studioPanel.classList.remove('visible');
-  appPanel.classList.remove('visible');
+function showRightPanel(target) {
+  const studio = document.getElementById('iframe-studio');
+  const app = document.getElementById('iframe-app');
 
-  if (panel === 'claude') {
-    claudePanel.classList.add('visible');
-  } else if (panel === 'studio') {
-    studioPanel.classList.add('visible');
-  } else if (panel === 'split') {
-    panelsEl.classList.add('split');
-    claudePanel.classList.add('visible');
-    studioPanel.classList.add('visible');
-  } else if (panel === 'app') {
-    appPanel.classList.add('visible');
-  } else if (panel === 'app-split') {
-    panelsEl.classList.add('split');
-    claudePanel.classList.add('visible');
-    appPanel.classList.add('visible');
+  if (target === 'data') {
+    studio.classList.add('visible');
+    app.classList.remove('visible');
+  } else if (target === 'apps') {
+    studio.classList.remove('visible');
+    // if an app is loaded, show it. otherwise show the app list
+    if (currentAppName) {
+      app.classList.add('visible');
+    } else {
+      app.classList.add('visible');
+      app.srcdoc = buildAppList();
+    }
   }
 }
 
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => showPanel(tab.dataset.panel));
-});
-
 function openApp(name) {
-  document.getElementById('iframe-app').src = `/apps/${name}/`;
-  document.getElementById('apps-menu').classList.remove('open');
-  // show app + claude side by side
-  showPanel('app-split');
+  currentAppName = name;
+  const app = document.getElementById('iframe-app');
+  app.srcdoc = '';
+  app.src = `/apps/${name}/`;
+
+  // switch to apps tab
+  document.querySelectorAll('.rtab').forEach(t => t.classList.remove('active'));
+  document.querySelector('.rtab[data-target="apps"]').classList.add('active');
+  document.getElementById('iframe-studio').classList.remove('visible');
+  app.classList.add('visible');
+
+  loadApps(); // refresh list in case
+}
+
+function buildAppList() {
+  return `<!DOCTYPE html>
+    <html><head><style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { background:#0a0a0a; color:#e5e5e5; font-family:'SF Mono',monospace; padding:16px; }
+      .app { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-bottom:4px; }
+      .app:hover { background:#262626; }
+      .app .name { flex:1; }
+      .app .popout { color:#737373; text-decoration:none; font-size:11px; padding:4px 8px; }
+      .app .popout:hover { color:#e5e5e5; }
+      .empty { color:#737373; font-size:12px; text-align:center; padding:40px; }
+      h2 { font-size:12px; color:#737373; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:12px; }
+    </style></head><body>
+    <h2>apps</h2>
+    <div id="list"><div class="empty">loading...</div></div>
+    <script>
+      fetch('/claude/apps', { headers: { 'Authorization': 'Bearer ${token}' }})
+        .then(r => r.json())
+        .then(apps => {
+          const list = document.getElementById('list');
+          if (!apps.length) { list.innerHTML = '<div class="empty">no apps yet — tell claude to build one</div>'; return; }
+          list.innerHTML = apps.map(a =>
+            '<div class="app" onclick="parent.openApp(\\'' + a.name + '\\')">' +
+              '<span class="name">' + a.name + '</span>' +
+              '<a class="popout" href="/apps/' + a.name + '/" target="_blank" onclick="event.stopPropagation()">&#8599;</a>' +
+            '</div>'
+          ).join('');
+        });
+    <\/script></body></html>`;
 }
 
 // ---------- resizer ----------
@@ -423,10 +534,9 @@ function openApp(name) {
 const resizer = document.getElementById('resizer');
 let isResizing = false;
 
-resizer.addEventListener('mousedown', (e) => {
+resizer.addEventListener('mousedown', () => {
   isResizing = true;
   document.body.style.cursor = 'col-resize';
-  // disable pointer events on iframes while resizing
   document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = 'none');
 });
 
@@ -436,12 +546,8 @@ document.addEventListener('mousemove', (e) => {
   const rect = panels.getBoundingClientRect();
   const pct = ((e.clientX - rect.left) / rect.width) * 100;
   const clamped = Math.max(20, Math.min(80, pct));
-  // resize whichever two panels are visible
-  const visible = document.querySelectorAll('.panel.visible');
-  if (visible.length === 2) {
-    visible[0].style.flex = `0 0 ${clamped}%`;
-    visible[1].style.flex = `0 0 ${100 - clamped}%`;
-  }
+  document.getElementById('panel-claude').style.flex = `0 0 ${clamped}%`;
+  document.getElementById('panel-right').style.flex = `0 0 ${100 - clamped}%`;
 });
 
 document.addEventListener('mouseup', () => {
@@ -451,42 +557,13 @@ document.addEventListener('mouseup', () => {
   document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = '');
 });
 
-// ---------- apps dropdown ----------
-
-document.getElementById('apps-btn').onclick = () => {
-  document.getElementById('apps-menu').classList.toggle('open');
-  loadApps();
-};
-
-// close dropdown on outside click
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.apps-dropdown')) {
-    document.getElementById('apps-menu').classList.remove('open');
-  }
-});
+// ---------- apps list (for refresh) ----------
 
 async function loadApps() {
-  try {
-    const res = await fetch('/claude/apps', {
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-    const apps = await res.json();
-    const menu = document.getElementById('apps-menu');
-
-    if (!apps.length) {
-      menu.innerHTML = '<div class="empty">no apps yet — tell claude to build one</div>';
-      return;
-    }
-
-    menu.innerHTML = apps.map(app =>
-      `<div style="display:flex;align-items:center;justify-content:space-between">
-        <a href="#" onclick="openApp('${app.name}');return false" style="flex:1">${app.name}</a>
-        <a href="/apps/${app.name}/" target="_blank" title="open in new tab" style="flex:none;padding:4px 8px;font-size:10px;color:var(--muted)">&#8599;</a>
-      </div>`
-    ).join('');
-  } catch {
-    document.getElementById('apps-menu').innerHTML =
-      '<div class="empty">failed to load apps</div>';
+  // just used to refresh the app list if it's showing
+  const app = document.getElementById('iframe-app');
+  if (app.classList.contains('visible') && !currentAppName) {
+    app.srcdoc = buildAppList();
   }
 }
 
@@ -494,10 +571,8 @@ async function loadApps() {
 
 window.addEventListener('message', (e) => {
   if (e.data?.type === 'upend:turn-complete') {
-    // refresh drizzle studio iframe
     const studio = document.getElementById('iframe-studio');
     if (studio?.src) studio.src = studio.src;
-    // refresh apps list
     loadApps();
   }
 });

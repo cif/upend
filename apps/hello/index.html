@@ -1,1 +1,316 @@
-<!DOCTYPE html><html><head><title>hello</title><style>body{background:#0a0a0a;color:#f97316;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;font-size:3em}</style></head><body>hello from upend 🔥</body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>things</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0a; color: #e5e5e5; font-family: monospace; min-height: 100vh; }
+
+    #login-screen {
+      display: flex; align-items: center; justify-content: center; height: 100vh;
+    }
+    #login-box {
+      display: flex; flex-direction: column; gap: 12px; width: 320px;
+    }
+    #login-box h1 { color: #f97316; font-size: 1.4em; margin-bottom: 4px; }
+
+    input, textarea, select {
+      background: #111; border: 1px solid #333; color: #e5e5e5;
+      font-family: monospace; font-size: 0.9em; padding: 8px 10px; width: 100%;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #f97316; }
+
+    button {
+      background: #f97316; color: #0a0a0a; border: none; font-family: monospace;
+      font-size: 0.9em; font-weight: bold; padding: 8px 14px; cursor: pointer;
+    }
+    button:hover { background: #ea6a0a; }
+    button.secondary {
+      background: transparent; color: #f97316; border: 1px solid #f97316;
+    }
+    button.secondary:hover { background: #f973161a; }
+    button.danger { background: transparent; color: #ef4444; border: 1px solid #333; font-weight: normal; }
+    button.danger:hover { border-color: #ef4444; }
+
+    #app { display: none; max-width: 860px; margin: 0 auto; padding: 32px 24px; }
+    #app-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px;
+    }
+    #app-header h1 { color: #f97316; font-size: 1.4em; }
+
+    #add-form {
+      display: grid; grid-template-columns: 1fr 140px auto; gap: 8px;
+      margin-bottom: 24px; align-items: start;
+    }
+    #add-form button { height: 36px; white-space: nowrap; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+    th {
+      text-align: left; color: #666; font-weight: normal; padding: 6px 10px;
+      border-bottom: 1px solid #222;
+    }
+    td { padding: 8px 10px; border-bottom: 1px solid #1a1a1a; vertical-align: middle; }
+    tr:hover td { background: #111; }
+
+    .shipped-badge {
+      background: #14532d; color: #4ade80; padding: 2px 8px; font-size: 0.8em;
+    }
+    .unshipped-badge {
+      background: #1a1a1a; color: #666; padding: 2px 8px; font-size: 0.8em;
+    }
+    .sku { color: #888; }
+    .row-actions { display: flex; gap: 6px; }
+
+    #modal-overlay {
+      display: none; position: fixed; inset: 0; background: #0a0a0acc;
+      align-items: center; justify-content: center; z-index: 100;
+    }
+    #modal-overlay.open { display: flex; }
+    #modal {
+      background: #111; border: 1px solid #333; padding: 24px; width: 420px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    #modal h2 { color: #f97316; font-size: 1.1em; margin-bottom: 4px; }
+    #modal label { color: #888; font-size: 0.8em; display: block; margin-bottom: 4px; }
+    #modal .field { display: flex; flex-direction: column; }
+    #modal .row { display: flex; gap: 10px; }
+    #modal .row .field { flex: 1; }
+    #modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+
+    #error { color: #ef4444; font-size: 0.85em; min-height: 1.2em; margin-bottom: 8px; }
+    #login-error { color: #ef4444; font-size: 0.85em; }
+    .loading { color: #555; }
+  </style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-screen">
+  <div id="login-box">
+    <h1>things</h1>
+    <input id="email" type="email" placeholder="email" autocomplete="username">
+    <input id="password" type="password" placeholder="password" autocomplete="current-password">
+    <div id="login-error"></div>
+    <button onclick="login()">login</button>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <div id="app-header">
+    <h1>things</h1>
+    <button class="secondary" onclick="logout()">logout</button>
+  </div>
+
+  <div id="add-form">
+    <input id="new-name" placeholder="name" onkeydown="if(event.key==='Enter') addThing()">
+    <input id="new-sku" placeholder="sku (optional)" onkeydown="if(event.key==='Enter') addThing()">
+    <button onclick="addThing()">+ add</button>
+  </div>
+
+  <div id="error"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>name</th>
+        <th>sku</th>
+        <th>status</th>
+        <th>created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="things-list">
+      <tr><td colspan="5" class="loading">loading...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Edit Modal -->
+<div id="modal-overlay" onclick="if(event.target===this) closeModal()">
+  <div id="modal">
+    <h2>edit thing</h2>
+    <input type="hidden" id="edit-id">
+    <div class="field">
+      <label>name</label>
+      <input id="edit-name" type="text">
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>sku</label>
+        <input id="edit-sku" type="text">
+      </div>
+      <div class="field">
+        <label>shipped</label>
+        <select id="edit-shipped">
+          <option value="false">no</option>
+          <option value="true">yes</option>
+        </select>
+      </div>
+    </div>
+    <div id="modal-actions">
+      <button class="secondary" onclick="closeModal()">cancel</button>
+      <button onclick="saveEdit()">save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const DATA_API = '/api/data';
+  let token = localStorage.getItem('upend_token');
+
+  function authHeaders() {
+    return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+  }
+
+  async function login() {
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    document.getElementById('login-error').textContent = '';
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'login failed');
+      token = data.token;
+      localStorage.setItem('upend_token', token);
+      showApp();
+    } catch (e) {
+      document.getElementById('login-error').textContent = e.message;
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem('upend_token');
+    token = null;
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'flex';
+  }
+
+  function showApp() {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    loadThings();
+  }
+
+  async function loadThings() {
+    const tbody = document.getElementById('things-list');
+    tbody.innerHTML = '<tr><td colspan="5" class="loading">loading...</td></tr>';
+    try {
+      const res = await fetch(`${DATA_API}/things?order=created_at.desc`, {
+        headers: authHeaders()
+      });
+      if (res.status === 401) { logout(); return; }
+      const things = await res.json();
+      if (!things.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="loading">no things yet</td></tr>';
+        return;
+      }
+      tbody.innerHTML = things.map(t => `
+        <tr>
+          <td>${esc(t.name)}</td>
+          <td class="sku">${esc(t.sku || '—')}</td>
+          <td>${t.shipped
+            ? '<span class="shipped-badge">shipped</span>'
+            : '<span class="unshipped-badge">pending</span>'}</td>
+          <td>${new Date(t.created_at).toLocaleDateString()}</td>
+          <td class="row-actions">
+            <button class="secondary" onclick='openEdit(${t.id}, ${JSON.stringify(t.name)}, ${JSON.stringify(t.sku||'')}, ${t.shipped})'>edit</button>
+            <button class="danger" onclick="deleteThing(${t.id})">del</button>
+          </td>
+        </tr>
+      `).join('');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function addThing() {
+    const name = document.getElementById('new-name').value.trim();
+    const sku = document.getElementById('new-sku').value.trim();
+    if (!name) return;
+    try {
+      const res = await fetch(`${DATA_API}/things`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Prefer': 'return=representation' },
+        body: JSON.stringify({ name, sku: sku || null })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      document.getElementById('new-name').value = '';
+      document.getElementById('new-sku').value = '';
+      loadThings();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function deleteThing(id) {
+    if (!confirm('delete this thing?')) return;
+    try {
+      const res = await fetch(`${DATA_API}/things?id=eq.${id}`, {
+        method: 'DELETE',
+        headers: authHeaders()
+      });
+      if (!res.ok) throw new Error(await res.text());
+      loadThings();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  function openEdit(id, name, sku, shipped) {
+    document.getElementById('edit-id').value = id;
+    document.getElementById('edit-name').value = name;
+    document.getElementById('edit-sku').value = sku;
+    document.getElementById('edit-shipped').value = String(shipped);
+    document.getElementById('modal-overlay').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+
+  async function saveEdit() {
+    const id = document.getElementById('edit-id').value;
+    const name = document.getElementById('edit-name').value.trim();
+    const sku = document.getElementById('edit-sku').value.trim();
+    const shipped = document.getElementById('edit-shipped').value === 'true';
+    if (!name) return;
+    try {
+      const res = await fetch(`${DATA_API}/things?id=eq.${id}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders(), 'Prefer': 'return=representation' },
+        body: JSON.stringify({ name, sku: sku || null, shipped })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      closeModal();
+      loadThings();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  function setError(msg) {
+    const el = document.getElementById('error');
+    el.textContent = msg;
+    setTimeout(() => el.textContent = '', 4000);
+  }
+
+  function esc(str) {
+    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // Init
+  if (token) showApp();
+
+  document.getElementById('password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') login();
+  });
+</script>
+</body>
+</html>

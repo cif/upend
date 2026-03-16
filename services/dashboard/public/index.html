@@ -172,42 +172,22 @@
 
   <!-- right panel -->
   <div class="flex-1 min-h-0 min-w-0 overflow-y-auto" id="panel-right">
-    <!-- app iframe (only when an app is selected) -->
+    <!-- app iframe -->
     <iframe x-show="rightPanel !== 'data' && rightPanel !== 'home'" x-ref="rightIframe" class="w-full h-full border-none"
       :src="token && rightPanel !== 'data' && rightPanel !== 'home' ? '/apps/' + rightPanel + '/' : 'about:blank'"></iframe>
 
-    <!-- data studio iframe (local dev only) -->
-    <iframe x-show="rightPanel === 'data' && studioUrl !== 'about:blank'" class="w-full h-full border-none"
-      :src="token && rightPanel === 'data' ? studioUrl : 'about:blank'"></iframe>
-
-    <!-- home panel (default) + data fallback (production has no studio) -->
-    <div x-show="rightPanel === 'home' || (rightPanel === 'data' && studioUrl === 'about:blank')" class="p-8 max-w-2xl mx-auto">
+    <!-- home panel -->
+    <div x-show="rightPanel === 'home'" class="p-8 max-w-2xl mx-auto">
       <h2 class="text-accent font-bold text-lg mb-6">what you can do with upend</h2>
-
       <div class="space-y-4">
         <div class="bg-surface border border-border rounded-lg p-4">
           <h3 class="text-sm font-bold text-gray-200 mb-2">talk to claude</h3>
-          <p class="text-xs text-muted leading-relaxed">Tell claude to create tables, add columns, build apps, write migrations — anything. It has full access to the codebase and database.</p>
+          <p class="text-xs text-muted leading-relaxed">Tell claude to create tables, add columns, build apps, write migrations — anything.</p>
           <div class="mt-3 space-y-1">
             <p class="text-xs text-muted italic cursor-pointer hover:text-accent" @click="prompt = 'create a products table with name, price, description, and an image_url'; $refs.chatInput.focus()">"create a products table with name, price, description, and image_url"</p>
-            <p class="text-xs text-muted italic cursor-pointer hover:text-accent" @click="prompt = 'build me a CRUD app for managing products at apps/products'; $refs.chatInput.focus()">"build me a CRUD app for managing products at apps/products"</p>
-            <p class="text-xs text-muted italic cursor-pointer hover:text-accent" @click="prompt = 'add RLS policies to the products table so users can only see their own products'; $refs.chatInput.focus()">"add RLS policies so users only see their own products"</p>
+            <p class="text-xs text-muted italic cursor-pointer hover:text-accent" @click="prompt = 'build me a CRUD app for managing products at apps/products'; $refs.chatInput.focus()">"build me a CRUD app for managing products"</p>
           </div>
         </div>
-
-        <div class="bg-surface border border-border rounded-lg p-4">
-          <h3 class="text-sm font-bold text-gray-200 mb-2">your tables</h3>
-          <div x-init="loadTables()" class="space-y-1">
-            <template x-for="t in tables" :key="t">
-              <div class="flex items-center justify-between text-xs">
-                <span class="text-gray-200 font-mono" x-text="t"></span>
-                <span class="text-muted cursor-pointer hover:text-accent" @click="prompt = 'show me the schema for the ' + t + ' table'; $refs.chatInput.focus()">inspect →</span>
-              </div>
-            </template>
-            <p x-show="tables.length === 0" class="text-muted text-xs">loading tables...</p>
-          </div>
-        </div>
-
         <div class="bg-surface border border-border rounded-lg p-4">
           <h3 class="text-sm font-bold text-gray-200 mb-2">apps</h3>
           <template x-for="app in apps" :key="app.name">
@@ -218,11 +198,102 @@
           </template>
           <p x-show="apps.length === 0" class="text-muted text-xs">no apps yet — tell claude to build one</p>
         </div>
+      </div>
+    </div>
 
-        <div class="bg-surface border border-border rounded-lg p-4">
-          <h3 class="text-sm font-bold text-gray-200 mb-2">data API</h3>
-          <p class="text-xs text-muted leading-relaxed mb-2">Your tables are available as REST endpoints via the Neon Data API (PostgREST).</p>
-          <code class="text-xs text-accent block bg-bg rounded px-3 py-2 font-mono">GET /api/data/&lt;table&gt;?order=created_at.desc&amp;limit=10</code>
+    <!-- data panel -->
+    <div x-show="rightPanel === 'data'" class="flex flex-col h-full" x-init="$watch('rightPanel', v => { if (v === 'data') loadTables() })">
+      <!-- table list sidebar + detail -->
+      <div class="flex flex-1 min-h-0">
+        <!-- table list -->
+        <div class="w-48 border-r border-border overflow-y-auto shrink-0 no-scrollbar">
+          <div class="p-3 border-b border-border">
+            <span class="text-xs text-muted uppercase tracking-wide">tables</span>
+          </div>
+          <template x-for="t in tables" :key="t">
+            <div @click="selectTable(t)"
+              :class="selectedTable === t ? 'bg-accent-dim text-accent' : 'text-muted hover:bg-border hover:text-gray-200'"
+              class="px-3 py-2 text-xs font-mono cursor-pointer truncate" x-text="t"></div>
+          </template>
+          <p x-show="tables.length === 0" class="text-muted text-xs p-3">no tables</p>
+        </div>
+
+        <!-- table detail -->
+        <div class="flex-1 overflow-y-auto no-scrollbar">
+          <!-- no table selected -->
+          <div x-show="!selectedTable" class="p-8 text-center text-muted text-sm">
+            select a table to view its schema
+          </div>
+
+          <!-- table schema -->
+          <div x-show="selectedTable">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div class="flex items-center gap-3">
+                <span class="text-sm font-bold font-mono text-gray-200" x-text="selectedTable"></span>
+                <span class="text-xs text-muted" x-text="tableColumns.length + ' columns'"></span>
+              </div>
+              <div class="flex gap-2">
+                <label class="bg-accent text-black text-xs px-3 py-1 rounded cursor-pointer font-mono">
+                  upload CSV
+                  <input type="file" accept=".csv" class="hidden" @change="uploadCSV($event)">
+                </label>
+                <button @click="prompt = 'build an admin CRUD app for the ' + selectedTable + ' table at apps/' + selectedTable; $refs.chatInput.focus()"
+                  class="text-xs text-muted border border-border px-3 py-1 rounded cursor-pointer hover:text-accent hover:border-accent font-mono">
+                  generate CRUD app
+                </button>
+              </div>
+            </div>
+
+            <!-- columns -->
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="border-b border-border text-muted">
+                  <th class="text-left px-4 py-2 font-normal">column</th>
+                  <th class="text-left px-4 py-2 font-normal">type</th>
+                  <th class="text-left px-4 py-2 font-normal">nullable</th>
+                  <th class="text-left px-4 py-2 font-normal">default</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="col in tableColumns" :key="col.columnName">
+                  <tr class="border-b border-border/50 hover:bg-surface">
+                    <td class="px-4 py-2 font-mono text-gray-200" x-text="col.columnName"></td>
+                    <td class="px-4 py-2 text-accent font-mono" x-text="col.dataType"></td>
+                    <td class="px-4 py-2 text-muted" x-text="col.isNullable"></td>
+                    <td class="px-4 py-2 text-muted font-mono truncate max-w-[200px]" x-text="col.columnDefault || '—'"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+
+            <!-- sample rows -->
+            <div x-show="sampleRows.length > 0" class="border-t border-border">
+              <div class="px-4 py-2 text-xs text-muted border-b border-border">
+                sample rows <span class="text-muted" x-text="'(' + sampleRows.length + ')'"></span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                  <thead>
+                    <tr class="border-b border-border text-muted">
+                      <template x-for="key in sampleRowKeys" :key="key">
+                        <th class="text-left px-3 py-2 font-normal font-mono whitespace-nowrap" x-text="key"></th>
+                      </template>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="(row, i) in sampleRows" :key="i">
+                      <tr class="border-b border-border/50 hover:bg-surface">
+                        <template x-for="key in sampleRowKeys" :key="key">
+                          <td class="px-3 py-2 text-gray-200 font-mono whitespace-nowrap max-w-[200px] truncate"
+                            x-text="typeof row[key] === 'object' ? JSON.stringify(row[key]) : row[key]"></td>
+                        </template>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -253,10 +324,11 @@ function dashboard() {
 
     // right panel
     tables: [],
+    selectedTable: null,
+    tableColumns: [],
+    sampleRows: [],
+    sampleRowKeys: [],
     rightPanel: 'home',
-    studioUrl: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-      ? 'https://local.drizzle.studio'
-      : 'about:blank',
     apps: [],
     appsOpen: false,
 
@@ -529,6 +601,64 @@ function dashboard() {
         const res = await fetch('/api/tables', { headers: this.authHeaders() });
         if (res.ok) this.tables = (await res.json()).map(t => t.name);
       } catch {}
+    },
+
+    async selectTable(name) {
+      this.selectedTable = name;
+      this.tableColumns = [];
+      this.sampleRows = [];
+      this.sampleRowKeys = [];
+      try {
+        // fetch columns
+        const colRes = await fetch(`/api/tables/${name}`, { headers: this.authHeaders() });
+        if (colRes.ok) this.tableColumns = await colRes.json();
+
+        // fetch sample rows via Neon Data API
+        const dataRes = await fetch(`/api/data/${name}?limit=5&order=id.desc`, { headers: this.authHeaders() });
+        if (dataRes.ok) {
+          const rows = await dataRes.json();
+          this.sampleRows = rows;
+          this.sampleRowKeys = rows.length > 0 ? Object.keys(rows[0]) : [];
+        }
+      } catch (err) {
+        console.error('[selectTable]', err);
+      }
+    },
+
+    async uploadCSV(event) {
+      const file = event.target.files[0];
+      if (!file || !this.selectedTable) return;
+      const text = await file.text();
+      const lines = text.trim().split('\n');
+      const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+        const row = {};
+        headers.forEach((h, j) => { row[h] = values[j] || null; });
+        rows.push(row);
+      }
+
+      // insert via Neon Data API
+      try {
+        const res = await fetch(`/api/data/${this.selectedTable}`, {
+          method: 'POST',
+          headers: { ...this.authHeaders(), 'Prefer': 'return=representation' },
+          body: JSON.stringify(rows),
+        });
+        if (res.ok) {
+          const inserted = await res.json();
+          this.messages.push({ role: 'system', content: `uploaded ${inserted.length} rows to ${this.selectedTable}` });
+          this.selectTable(this.selectedTable); // refresh
+        } else {
+          const err = await res.json();
+          this.messages.push({ role: 'system', content: `CSV upload failed: ${err.message || JSON.stringify(err)}` });
+        }
+      } catch (err) {
+        this.messages.push({ role: 'system', content: `CSV upload failed: ${err.message}` });
+      }
+      event.target.value = ''; // reset file input
     },
 
     async loadApps() {

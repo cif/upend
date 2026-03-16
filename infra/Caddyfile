@@ -28,6 +28,14 @@
 		reverse_proxy localhost:3002
 	}
 
+	# pgweb data studio
+	handle /studio {
+		redir /studio/ permanent
+	}
+	handle_path /studio/* {
+		reverse_proxy localhost:4983
+	}
+
 	# JWKS at root
 	handle /.well-known/* {
 		reverse_proxy localhost:3001

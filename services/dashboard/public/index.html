@@ -270,7 +270,6 @@
     </div>
   </div>
   <div class="right">
-    <a href="/api/openapi.json" target="_blank" class="btn" style="text-decoration:none">API spec</a>
     <div class="apps-dropdown">
       <button class="btn" id="apps-btn">apps</button>
       <div class="apps-menu" id="apps-menu"></div>
@@ -288,6 +287,9 @@
   <div class="resizer" id="resizer"></div>
   <div class="panel" id="panel-studio">
     <iframe id="iframe-studio"></iframe>
+  </div>
+  <div class="panel" id="panel-app">
+    <iframe id="iframe-app"></iframe>
   </div>
 </div>
 
@@ -373,32 +375,48 @@ function loadIframes() {
 
 // ---------- tabs ----------
 
+function showPanel(panel) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  const activeTab = document.querySelector(`.tab[data-panel="${panel}"]`);
+  if (activeTab) activeTab.classList.add('active');
+
+  const panelsEl = document.getElementById('panels');
+  const claudePanel = document.getElementById('panel-claude');
+  const studioPanel = document.getElementById('panel-studio');
+  const appPanel = document.getElementById('panel-app');
+
+  panelsEl.classList.remove('split');
+  claudePanel.classList.remove('visible');
+  studioPanel.classList.remove('visible');
+  appPanel.classList.remove('visible');
+
+  if (panel === 'claude') {
+    claudePanel.classList.add('visible');
+  } else if (panel === 'studio') {
+    studioPanel.classList.add('visible');
+  } else if (panel === 'split') {
+    panelsEl.classList.add('split');
+    claudePanel.classList.add('visible');
+    studioPanel.classList.add('visible');
+  } else if (panel === 'app') {
+    appPanel.classList.add('visible');
+  } else if (panel === 'app-split') {
+    panelsEl.classList.add('split');
+    claudePanel.classList.add('visible');
+    appPanel.classList.add('visible');
+  }
+}
+
 document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-
-    const panel = tab.dataset.panel;
-
-    const panels = document.getElementById('panels');
-    const claudePanel = document.getElementById('panel-claude');
-    const studioPanel = document.getElementById('panel-studio');
-
-    panels.classList.remove('split');
-
-    if (panel === 'claude') {
-      claudePanel.classList.add('visible');
-      studioPanel.classList.remove('visible');
-    } else if (panel === 'studio') {
-      claudePanel.classList.remove('visible');
-      studioPanel.classList.add('visible');
-    } else if (panel === 'split') {
-      panels.classList.add('split');
-      claudePanel.classList.add('visible');
-      studioPanel.classList.add('visible');
-    }
-  });
+  tab.addEventListener('click', () => showPanel(tab.dataset.panel));
 });
+
+function openApp(name) {
+  document.getElementById('iframe-app').src = `/apps/${name}/`;
+  document.getElementById('apps-menu').classList.remove('open');
+  // show app + claude side by side
+  showPanel('app-split');
+}
 
 // ---------- resizer ----------
 
@@ -418,8 +436,12 @@ document.addEventListener('mousemove', (e) => {
   const rect = panels.getBoundingClientRect();
   const pct = ((e.clientX - rect.left) / rect.width) * 100;
   const clamped = Math.max(20, Math.min(80, pct));
-  document.getElementById('panel-claude').style.flex = `0 0 ${clamped}%`;
-  document.getElementById('panel-studio').style.flex = `0 0 ${100 - clamped}%`;
+  // resize whichever two panels are visible
+  const visible = document.querySelectorAll('.panel.visible');
+  if (visible.length === 2) {
+    visible[0].style.flex = `0 0 ${clamped}%`;
+    visible[1].style.flex = `0 0 ${100 - clamped}%`;
+  }
 });
 
 document.addEventListener('mouseup', () => {
@@ -457,7 +479,10 @@ async function loadApps() {
     }
 
     menu.innerHTML = apps.map(app =>
-      `<a href="/apps/${app.name}/" target="_blank">${app.name}</a>`
+      `<div style="display:flex;align-items:center;justify-content:space-between">
+        <a href="#" onclick="openApp('${app.name}');return false" style="flex:1">${app.name}</a>
+        <a href="/apps/${app.name}/" target="_blank" title="open in new tab" style="flex:none;padding:4px 8px;font-size:10px;color:var(--muted)">&#8599;</a>
+      </div>`
     ).join('');
   } catch {
     document.getElementById('apps-menu').innerHTML =

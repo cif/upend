@@ -415,11 +415,22 @@ function dashboard() {
       return { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' };
     },
 
+    async authFetch(url, opts = {}) {
+      opts.headers = { ...this.authHeaders(), ...opts.headers };
+      const res = await fetch(url, opts);
+      if (res.status === 401) {
+        console.warn('[auth] token expired, logging out');
+        this.logout();
+        return null;
+      }
+      return res;
+    },
+
     // ---------- sessions ----------
 
     async loadSessions() {
       try {
-        const res = await fetch('/claude/sessions', { headers: this.authHeaders() });
+        const res = await this.authFetch('/claude/sessions');
         if (res.ok) this.sessions = await res.json();
       } catch (err) {
         console.error('[sessions]', err);
@@ -428,7 +439,7 @@ function dashboard() {
 
     async openSession(id) {
       try {
-        const res = await fetch(`/claude/sessions/${id}`, { headers: this.authHeaders() });
+        const res = await this.authFetch(`/claude/sessions/${id}`);
         if (!res.ok) throw new Error('session not found');
         const session = await res.json();
 
@@ -486,9 +497,7 @@ function dashboard() {
       // check mergability first
       this.messages.push({ role: 'system', content: 'checking merge...' });
       try {
-        const checkRes = await fetch(`/claude/sessions/${this.currentSessionId}/mergeable`, {
-          headers: this.authHeaders(),
-        });
+        const checkRes = await this.authFetch(`/claude/sessions/${this.currentSessionId}/mergeable`);
         const check = await checkRes.json();
 
         if (!check.mergeable) {
@@ -500,9 +509,7 @@ function dashboard() {
       if (!confirm('Merge this session to live? Changes will be deployed immediately.')) return;
 
       try {
-        const res = await fetch(`/claude/sessions/${this.currentSessionId}/commit`, {
-          method: 'POST', headers: this.authHeaders(),
-        });
+        const res = await this.authFetch(`/claude/sessions/${this.currentSessionId}/commit`, { method: 'POST' });
         const data = await res.json();
 
         if (!res.ok) {
@@ -545,9 +552,8 @@ function dashboard() {
     async createSession(text, title) {
       this.setStatus('running', 'creating session...');
       try {
-        const res = await fetch('/claude/sessions', {
+        const res = await this.authFetch('/claude/sessions', {
           method: 'POST',
-          headers: this.authHeaders(),
           body: JSON.stringify({ prompt: text, force: true, title }),
         });
         const data = await res.json();
@@ -566,9 +572,8 @@ function dashboard() {
     async sendMessage(text) {
       this.setStatus('running', 'sending...');
       try {
-        const res = await fetch(`/claude/sessions/${this.currentSessionId}/messages`, {
+        const res = await this.authFetch(`/claude/sessions/${this.currentSessionId}/messages`, {
           method: 'POST',
-          headers: this.authHeaders(),
           body: JSON.stringify({ prompt: text }),
         });
         const data = await res.json();
@@ -651,7 +656,7 @@ function dashboard() {
 
     async loadTables() {
       try {
-        const res = await fetch('/api/tables', { headers: this.authHeaders() });
+        const res = await this.authFetch('/api/tables');
         if (res.ok) this.tables = (await res.json()).map(t => t.name);
       } catch {}
     },
@@ -663,11 +668,11 @@ function dashboard() {
       this.sampleRowKeys = [];
       try {
         // fetch columns
-        const colRes = await fetch(`/api/tables/${name}`, { headers: this.authHeaders() });
+        const colRes = await this.authFetch(`/api/tables/${name}`);
         if (colRes.ok) this.tableColumns = await colRes.json();
 
         // fetch sample rows via Neon Data API
-        const dataRes = await fetch(`/api/data/${name}?limit=5&order=id.desc`, { headers: this.authHeaders() });
+        const dataRes = await this.authFetch(`/api/data/${name}?limit=5&order=id.desc`);
         if (dataRes.ok) {
           const rows = await dataRes.json();
           this.sampleRows = rows;
@@ -695,9 +700,9 @@ function dashboard() {
 
       // insert via Neon Data API
       try {
-        const res = await fetch(`/api/data/${this.selectedTable}`, {
+        const res = await this.authFetch(`/api/data/${this.selectedTable}`, {
           method: 'POST',
-          headers: { ...this.authHeaders(), 'Prefer': 'return=representation' },
+          headers: { 'Prefer': 'return=representation' },
           body: JSON.stringify(rows),
         });
         if (res.ok) {
@@ -716,7 +721,7 @@ function dashboard() {
 
     async loadApps() {
       try {
-        const res = await fetch('/claude/apps', { headers: this.authHeaders() });
+        const res = await this.authFetch('/claude/apps');
         if (res.ok) this.apps = await res.json();
       } catch {}
     },

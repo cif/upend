@@ -192,7 +192,7 @@
   <div class="flex-1 min-h-0 min-w-0 overflow-y-auto" id="panel-right">
     <!-- app iframe -->
     <iframe x-show="rightPanel !== 'data' && rightPanel !== 'home'" x-ref="rightIframe" class="w-full h-full border-none"
-      :src="token && rightPanel !== 'data' && rightPanel !== 'home' ? '/apps/' + rightPanel + '/' : 'about:blank'"></iframe>
+      :src="token && rightPanel !== 'data' && rightPanel !== 'home' ? appUrl(rightPanel) : 'about:blank'"></iframe>
 
     <!-- home panel -->
     <div x-show="rightPanel === 'home'" class="p-8 max-w-2xl mx-auto">
@@ -331,6 +331,7 @@ function dashboard() {
     // sessions
     sessions: [],
     currentSessionId: localStorage.getItem('upend_dashboard_session') ? Number(localStorage.getItem('upend_dashboard_session')) : null,
+    currentWorktree: null,
     drawerOpen: false,
 
     // session modal
@@ -444,6 +445,8 @@ function dashboard() {
         const session = await res.json();
 
         this.currentSessionId = Number(id);
+        const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
+        this.currentWorktree = ctx?.worktree || null;
         localStorage.setItem('upend_dashboard_session', id);
         this.drawerOpen = false;
 
@@ -483,6 +486,7 @@ function dashboard() {
 
     newSession() {
       this.currentSessionId = null;
+      this.currentWorktree = null;
       localStorage.removeItem('upend_dashboard_session');
       this.messages = [];
       this.drawerOpen = false;
@@ -560,9 +564,11 @@ function dashboard() {
         if (!res.ok) throw new Error(data.error || data.message);
 
         this.currentSessionId = Number(data.session.id);
+        this.currentWorktree = data.worktree;
         localStorage.setItem('upend_dashboard_session', this.currentSessionId);
         this.connectWS(this.currentSessionId);
         this.loadSessions();
+        this.loadApps();
       } catch (err) {
         this.messages.push({ role: 'system', content: `failed to create session: ${err.message}` });
         this.setStatus('error', 'failed');
@@ -721,14 +727,24 @@ function dashboard() {
 
     async loadApps() {
       try {
-        const res = await this.authFetch('/claude/apps');
-        if (res.ok) this.apps = await res.json();
+        const url = this.currentWorktree
+          ? `/claude/apps?session=${this.currentWorktree}`
+          : '/claude/apps';
+        const res = await this.authFetch(url);
+        if (res?.ok) this.apps = await res.json();
       } catch {}
     },
 
     openApp(name) {
       this.rightPanel = name;
       this.appsOpen = false;
+    },
+
+    appUrl(name) {
+      if (this.currentWorktree) {
+        return `/claude/preview/${this.currentWorktree}/${name}/`;
+      }
+      return `/apps/${name}/`;
     },
 
     createNewApp() {

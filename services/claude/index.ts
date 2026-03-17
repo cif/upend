@@ -209,11 +209,22 @@ app.post("/sessions/:id/commit", async (c) => {
 
 // ---------- apps ----------
 
+// helper: resolve apps dir for live or session worktree
+function resolveAppsDir(c: any): string {
+  const sessionName = c.req.query("session");
+  if (sessionName) {
+    const worktreeApps = join(getWorktreePath(sessionName), "apps");
+    if (existsSync(worktreeApps)) return worktreeApps;
+  }
+  return APPS_DIR;
+}
+
 app.get("/apps", async (c) => {
-  mkdirSync(APPS_DIR, { recursive: true });
-  const apps = readdirSync(APPS_DIR)
-    .filter((f) => statSync(join(APPS_DIR, f)).isDirectory())
-    .map((name) => ({ name, url: `/apps/${name}/`, created: statSync(join(APPS_DIR, name)).birthtime }));
+  const appsDir = resolveAppsDir(c);
+  mkdirSync(appsDir, { recursive: true });
+  const apps = readdirSync(appsDir)
+    .filter((f) => statSync(join(appsDir, f)).isDirectory())
+    .map((name) => ({ name, url: `/apps/${name}/`, created: statSync(join(appsDir, name)).birthtime }));
   return c.json(apps);
 });
 
@@ -230,6 +241,24 @@ app.post("/apps", async (c) => {
     writeFileSync(filePath, content as string);
   }
   return c.json({ app: name, url: `/apps/${name}/`, files: Object.keys(files), live: true }, 201);
+});
+
+// serve app files from a session worktree (preview before commit)
+app.get("/preview/:session/*", async (c) => {
+  const sessionName = c.req.param("session");
+  const filePath = c.req.path.replace(`/preview/${sessionName}/`, "");
+  const worktreeApps = join(getWorktreePath(sessionName), "apps", filePath);
+
+  // try exact file, then index.html
+  for (const candidate of [worktreeApps, join(worktreeApps, "index.html")]) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) {
+      const file = Bun.file(candidate);
+      return new Response(file, {
+        headers: { "Content-Type": file.type || "text/html" },
+      });
+    }
+  }
+  return c.json({ error: "not found" }, 404);
 });
 
 app.post("/apps/generate", async (c) => {

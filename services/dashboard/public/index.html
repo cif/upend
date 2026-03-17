@@ -257,8 +257,8 @@
           <h3 class="text-sm font-bold text-gray-200 mb-2">apps</h3>
           <template x-for="app in apps" :key="app.name">
             <div class="flex items-center justify-between text-xs mb-1">
-              <span class="text-gray-200 font-mono" x-text="app.name"></span>
-              <span class="text-accent cursor-pointer" @click="openApp(app.name)">open →</span>
+              <span class="text-gray-200 font-mono cursor-pointer hover:text-accent" x-text="app.name" @click="openApp(app.name)"></span>
+              <a :href="appUrl(app.name)" target="_blank" class="text-muted hover:text-accent cursor-pointer text-[10px]">&#8599;</a>
             </div>
           </template>
           <p x-show="apps.length === 0" class="text-muted text-xs">no apps yet — tell claude to build one</p>
@@ -819,7 +819,7 @@ function dashboard() {
 
     appUrl(name) {
       if (this.currentWorktree) {
-        return `/claude/preview/${this.currentWorktree}/${name}/`;
+        return `/claude/preview/${this.currentWorktree}/apps/${name}/`;
       }
       return `/apps/${name}/`;
     },

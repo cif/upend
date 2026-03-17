@@ -18,11 +18,28 @@ app.use("*", cors());
 app.use("/ui/*", serveStatic({ root: "./services/claude/public", rewriteRequestPath: (p) => p.replace("/ui", "") }));
 app.get("/", (c) => c.redirect("/ui/"));
 
-// everything else requires auth
-app.use("*", requireAuth);
-
 const PROJECT_ROOT = process.env.UPEND_ROOT || process.cwd();
 const APPS_DIR = join(PROJECT_ROOT, "apps");
+
+// preview endpoint — public (served in iframes, no auth header)
+app.get("/preview/:session/*", async (c) => {
+  const sessionName = c.req.param("session");
+  const filePath = c.req.path.replace(`/preview/${sessionName}/`, "");
+  const fullPath = join(getWorktreePath(sessionName), filePath);
+
+  for (const candidate of [fullPath, join(fullPath, "index.html")]) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) {
+      const file = Bun.file(candidate);
+      return new Response(file, {
+        headers: { "Content-Type": file.type || "text/html" },
+      });
+    }
+  }
+  return c.json({ error: "not found" }, 404);
+});
+
+// everything else requires auth
+app.use("*", requireAuth);
 
 // ---------- websocket clients ----------
 
@@ -244,23 +261,6 @@ app.post("/apps", async (c) => {
 });
 
 // serve app files from a session worktree (preview before commit)
-app.get("/preview/:session/*", async (c) => {
-  const sessionName = c.req.param("session");
-  const filePath = c.req.path.replace(`/preview/${sessionName}/`, "");
-  const worktreeApps = join(getWorktreePath(sessionName), "apps", filePath);
-
-  // try exact file, then index.html
-  for (const candidate of [worktreeApps, join(worktreeApps, "index.html")]) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) {
-      const file = Bun.file(candidate);
-      return new Response(file, {
-        headers: { "Content-Type": file.type || "text/html" },
-      });
-    }
-  }
-  return c.json({ error: "not found" }, 404);
-});
-
 app.post("/apps/generate", async (c) => {
   const { name, prompt } = await c.req.json();
   if (!name || !prompt) return c.json({ error: "name and prompt required" }, 400);
@@ -319,7 +319,14 @@ async function runMessage(
     broadcast(sessionId, { type: "status", status: "running", messageId });
     console.log(`[claude:${sessionId}] message ${messageId} → running (user: ${user.email})`);
 
-    const userContext = `The current user is ${user.email} with id ${user.sub}. When inserting records that have an owner_id column, always set owner_id to '${user.sub}' so RLS policies work correctly.`;
+    const userContext = [
+      `The current user is ${user.email} with id ${user.sub}.`,
+      `When inserting records that have an owner_id column, always set owner_id to '${user.sub}'.`,
+      `IMPORTANT: You are working in a SESSION WORKTREE at ${cwd}.`,
+      `ALL file changes MUST be made inside ${cwd}. NEVER write to /opt/upend/ directly.`,
+      `Apps go in ${cwd}/apps/, migrations in ${cwd}/migrations/, services in ${cwd}/services/.`,
+      `Your changes will be previewed and then published to live when the user clicks publish.`,
+    ].join(' ');
 
     const args = [
       "claude", "-p", prompt,

@@ -425,8 +425,12 @@ function dashboard() {
       this.$watch('showCloseModal', () => this.$nextTick(() => lucide?.createIcons()));
       this.$watch('showPublishModal', () => this.$nextTick(() => lucide?.createIcons()));
 
-      if (this.token && this.currentSessionId) {
-        this.openSession(this.currentSessionId);
+      if (this.token) {
+        this.loadApps();
+        this.loadTables();
+        if (this.currentSessionId) {
+          this.openSession(this.currentSessionId);
+        }
       }
       document.addEventListener('mousemove', (e) => this.onResize(e));
       document.addEventListener('mouseup', () => this.stopResize());

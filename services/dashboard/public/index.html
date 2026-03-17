@@ -459,17 +459,41 @@ function dashboard() {
 
     async commitSession() {
       if (!this.currentSessionId) return;
-      if (!confirm('Commit this session? (ends it, changes stay as-is)')) return;
+
+      // check mergability first
+      this.messages.push({ role: 'system', content: 'checking merge...' });
       try {
-        await fetch(`/claude/sessions/${this.currentSessionId}/end`, {
+        const checkRes = await fetch(`/claude/sessions/${this.currentSessionId}/mergeable`, {
+          headers: this.authHeaders(),
+        });
+        const check = await checkRes.json();
+
+        if (!check.mergeable) {
+          this.messages.push({ role: 'system', content: `merge has conflicts:\n${check.conflicts.join('\n')}\n\ntell claude to resolve them, then try again.` });
+          return;
+        }
+      } catch {}
+
+      if (!confirm('Merge this session to live? Changes will be deployed immediately.')) return;
+
+      try {
+        const res = await fetch(`/claude/sessions/${this.currentSessionId}/commit`, {
           method: 'POST', headers: this.authHeaders(),
         });
-        this.messages.push({ role: 'system', content: 'session committed.' });
+        const data = await res.json();
+
+        if (!res.ok) {
+          this.messages.push({ role: 'system', content: `commit failed: ${data.message || data.error}\n\ntell claude to resolve any conflicts.` });
+          return;
+        }
+
+        this.messages.push({ role: 'system', content: 'committed to live. services restarting.' });
         this.setStatus('done', 'committed');
         this.currentSessionId = null;
         localStorage.removeItem('upend_dashboard_session');
         if (this.ws) { this.ws.close(); this.ws = null; }
         this.loadSessions();
+        this.refreshRightPanel();
       } catch (err) {
         this.messages.push({ role: 'system', content: `commit failed: ${err.message}` });
       }

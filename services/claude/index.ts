@@ -6,6 +6,7 @@ import { sql } from "../../lib/db";
 import { verifyToken } from "../../lib/auth";
 import { requireAuth } from "../../lib/middleware";
 import { snapshot, listSnapshots, restoreSnapshot } from "./snapshots";
+import { generateSessionName, createWorktree, commitWorktree, checkMergeable, mergeToLive, removeWorktree, getWorktreePath } from "./worktree";
 import { existsSync, mkdirSync, readdirSync, writeFileSync, statSync } from "fs";
 import { join } from "path";
 
@@ -65,14 +66,17 @@ app.post("/sessions", async (c) => {
   }
 
   console.log(`[session] new session for ${user.email}: "${prompt.slice(0, 80)}"`);
-  const snap = await snapshot(PROJECT_ROOT);
-  console.log(`[session] snapshot: ${snap}`);
+
+  // create git worktree for isolated editing
+  const sessionName = generateSessionName();
+  const worktree = await createWorktree(sessionName);
+  console.log(`[session] worktree: ${sessionName} at ${worktree.path}`);
 
   const claudeSessionId = crypto.randomUUID();
 
   const [session] = await sql`
     INSERT INTO editing_sessions (prompt, status, claude_session_id, snapshot_name, context)
-    VALUES (${prompt}, 'active', ${claudeSessionId}, ${snap}, ${JSON.stringify({ root: PROJECT_ROOT })})
+    VALUES (${prompt}, 'active', ${claudeSessionId}, ${sessionName}, ${JSON.stringify({ root: worktree.path, worktree: sessionName, branch: worktree.branch })})
     RETURNING *
   `;
 
@@ -82,9 +86,9 @@ app.post("/sessions", async (c) => {
     RETURNING *
   `;
 
-  runMessage(Number(session.id), Number(msg.id), prompt, claudeSessionId, false, user);
+  runMessage(Number(session.id), Number(msg.id), prompt, claudeSessionId, false, user, worktree.path);
 
-  return c.json({ session, message: msg, snapshot: snap }, 201);
+  return c.json({ session, message: msg, worktree: sessionName }, 201);
 });
 
 app.post("/sessions/:id/messages", async (c) => {
@@ -108,7 +112,9 @@ app.post("/sessions/:id/messages", async (c) => {
   `;
 
   const user = c.get("user") as { sub: string; email: string };
-  runMessage(Number(sessionId), Number(msg.id), prompt, session.claudeSessionId, true, user);
+  const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
+  const worktreePath = ctx?.root || PROJECT_ROOT;
+  runMessage(Number(sessionId), Number(msg.id), prompt, session.claudeSessionId, true, user, worktreePath);
 
   return c.json(msg, 201);
 });
@@ -142,6 +148,63 @@ app.post("/sessions/:id/kill", async (c) => {
   await sql`UPDATE session_messages SET status = 'killed' WHERE session_id = ${id} AND status = 'running'`;
   broadcast(id, { type: "status", status: "killed" });
   return c.json({ killed: true });
+});
+
+// ---------- session commit (merge to live) ----------
+
+// check if a session can merge cleanly
+app.get("/sessions/:id/mergeable", async (c) => {
+  const id = c.req.param("id");
+  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${id}`;
+  if (!session) return c.json({ error: "not found" }, 404);
+
+  const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
+  if (!ctx?.worktree) return c.json({ error: "session has no worktree" }, 400);
+
+  try {
+    // commit pending changes in worktree first
+    await commitWorktree(ctx.worktree, `session ${ctx.worktree}: auto-commit`);
+    const result = await checkMergeable(ctx.worktree);
+    return c.json(result);
+  } catch (err: any) {
+    return c.json({ mergeable: false, conflicts: [], error: err.message });
+  }
+});
+
+// commit session — merge worktree into live
+app.post("/sessions/:id/commit", async (c) => {
+  const id = c.req.param("id");
+  const user = c.get("user") as { sub: string; email: string };
+  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${id}`;
+  if (!session) return c.json({ error: "not found" }, 404);
+  if (session.status !== "active") return c.json({ error: `session is ${session.status}` }, 400);
+
+  const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
+  if (!ctx?.worktree) return c.json({ error: "session has no worktree" }, 400);
+
+  try {
+    // commit any pending changes
+    await commitWorktree(ctx.worktree, `session ${ctx.worktree}: final changes by ${user.email}`);
+
+    // merge into live
+    const result = await mergeToLive(ctx.worktree, user.email);
+
+    if (!result.success) {
+      return c.json({ error: "merge_conflict", message: result.message }, 409);
+    }
+
+    // mark session as committed
+    await sql`UPDATE editing_sessions SET status = 'committed' WHERE id = ${id}`;
+
+    // restart live services so changes take effect
+    restartServices();
+
+    console.log(`[session] ${ctx.worktree} committed to live by ${user.email}`);
+    return c.json({ committed: true, session: ctx.worktree, message: result.message });
+  } catch (err: any) {
+    console.error(`[session] commit failed:`, err);
+    return c.json({ error: err.message }, 500);
+  }
 });
 
 // ---------- apps ----------
@@ -219,7 +282,8 @@ async function runMessage(
   prompt: string,
   claudeSessionId: string,
   isResume: boolean,
-  user: { sub: string; email: string }
+  user: { sub: string; email: string },
+  cwd: string = PROJECT_ROOT
 ) {
   try {
     await sql`UPDATE session_messages SET status = 'running' WHERE id = ${messageId}`;
@@ -242,9 +306,10 @@ async function runMessage(
     }
 
     console.log(`[claude:${sessionId}] spawning: ${args.join(" ")}`);
+    console.log(`[claude:${sessionId}] cwd: ${cwd}`);
 
     const proc = Bun.spawn(args, {
-      cwd: PROJECT_ROOT,
+      cwd,
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "upend" },
       stdout: "pipe",
       stderr: "pipe",
@@ -343,13 +408,15 @@ async function runMessage(
 }
 
 function restartServices() {
-  if (process.env.NODE_ENV === "production") {
-    Bun.spawn(["bash", "-c", `
-      for svc in $(bun -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync('infra/services.json','utf8'))).filter(s=>s!=='claude').join(' '))"); do
-        sudo systemctl restart "upend@$svc"
-      done
-    `], { cwd: PROJECT_ROOT, stdout: "inherit", stderr: "inherit" });
-  }
+  console.log("[restart] restarting non-claude services...");
+  // kill and restart API service (claude service stays running since we're in it)
+  Bun.spawn(["bash", "-c", `
+    pkill -f "bun services/api" 2>/dev/null || true
+    sleep 1
+    cd ${PROJECT_ROOT}
+    nohup dotenvx run -- bun services/api/index.ts > /tmp/upend-api.log 2>&1 &
+    echo "api restarted"
+  `], { stdout: "inherit", stderr: "inherit" });
 }
 
 // ---------- bun server with websocket support ----------

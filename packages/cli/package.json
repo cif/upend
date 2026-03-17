@@ -1,0 +1,26 @@
+{
+  "name": "@upend/cli",
+  "version": "0.1.0",
+  "description": "Anti-SaaS stack. Deploy live apps with Claude, Postgres, and rsync.",
+  "type": "module",
+  "bin": {
+    "upend": "./bin/cli.ts"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates"
+  ],
+  "keywords": ["cli", "deploy", "postgres", "claude", "rsync", "caddy", "bun"],
+  "author": "cif",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cif/upend"
+  },
+  "dependencies": {
+    "hono": "^4.12.8",
+    "jose": "^6.2.1",
+    "postgres": "^3.4.8"
+  }
+}

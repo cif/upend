@@ -118,11 +118,29 @@
       <div @click="openSession(s.id)"
         :class="s.id == currentSessionId ? 'bg-accent-dim text-accent' : 'text-muted hover:bg-border hover:text-gray-200'"
         class="px-3 py-2 rounded-md cursor-pointer text-xs truncate mb-0.5"
-        x-text="s.prompt.slice(0, 50)"></div>
+        x-text="s.title || s.prompt.slice(0, 50)"></div>
     </template>
     <p x-show="sessions.filter(s => s.status === 'active').length === 0"
       class="text-muted text-xs text-center py-6">no active sessions</p>
   </div>
+</div>
+
+<!-- new session modal -->
+<div x-show="showSessionModal" x-transition class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+  <form @submit.prevent="showSessionModal = false; createSession(_pendingPrompt, sessionTitle)"
+    @keydown.escape="showSessionModal = false; messages.pop()"
+    class="bg-surface border border-border rounded-xl p-6 w-96 flex flex-col gap-4">
+    <h3 class="text-accent font-bold text-sm">new session</h3>
+    <p class="text-muted text-xs">what are you working on?</p>
+    <input x-model="sessionTitle" x-ref="sessionTitleInput" type="text" placeholder="e.g. add products table and CRUD app"
+      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+    <div class="flex gap-2 justify-end">
+      <button type="button" @click="showSessionModal = false; messages.pop()"
+        class="text-muted text-xs px-3 py-1.5 rounded border border-border cursor-pointer hover:text-gray-200 font-mono">cancel</button>
+      <button type="submit" :disabled="!sessionTitle.trim()"
+        class="bg-accent text-black text-xs px-4 py-1.5 rounded font-bold cursor-pointer disabled:opacity-40 font-mono">start session</button>
+    </div>
+  </form>
 </div>
 
 <!-- main panels -->
@@ -315,6 +333,11 @@ function dashboard() {
     currentSessionId: localStorage.getItem('upend_dashboard_session') ? Number(localStorage.getItem('upend_dashboard_session')) : null,
     drawerOpen: false,
 
+    // session modal
+    showSessionModal: false,
+    sessionTitle: '',
+    _pendingPrompt: '',
+
     // chat
     messages: [],
     prompt: '',
@@ -340,7 +363,7 @@ function dashboard() {
     get sessionLabel() {
       if (!this.currentSessionId) return 'no session';
       const s = this.sessions.find(s => s.id == this.currentSessionId);
-      return s?.prompt?.slice(0, 40) || `#${this.currentSessionId}`;
+      return s?.title || s?.prompt?.slice(0, 40) || `#${this.currentSessionId}`;
     },
 
     // ---------- init ----------
@@ -509,19 +532,23 @@ function dashboard() {
       this.scrollToBottom();
 
       if (!this.currentSessionId) {
-        await this.createSession(text);
+        this._pendingPrompt = text;
+        this.showSessionModal = true;
+        this.sessionTitle = '';
+        this.$nextTick(() => this.$refs.sessionTitleInput?.focus());
+        return;
       } else {
         await this.sendMessage(text);
       }
     },
 
-    async createSession(text) {
+    async createSession(text, title) {
       this.setStatus('running', 'creating session...');
       try {
         const res = await fetch('/claude/sessions', {
           method: 'POST',
           headers: this.authHeaders(),
-          body: JSON.stringify({ prompt: text, force: true }),
+          body: JSON.stringify({ prompt: text, force: true, title }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || data.message);

@@ -40,7 +40,7 @@ function broadcast(sessionId: number, msg: any) {
 // ---------- sessions ----------
 
 app.post("/sessions", async (c) => {
-  const { prompt, force } = await c.req.json();
+  const { prompt, force, title } = await c.req.json();
   if (!prompt) return c.json({ error: "prompt is required" }, 400);
 
   const user = c.get("user") as { sub: string; email: string };
@@ -75,8 +75,8 @@ app.post("/sessions", async (c) => {
   const claudeSessionId = crypto.randomUUID();
 
   const [session] = await sql`
-    INSERT INTO editing_sessions (prompt, status, claude_session_id, snapshot_name, context)
-    VALUES (${prompt}, 'active', ${claudeSessionId}, ${sessionName}, ${JSON.stringify({ root: worktree.path, worktree: sessionName, branch: worktree.branch })})
+    INSERT INTO editing_sessions (prompt, status, claude_session_id, snapshot_name, title, context)
+    VALUES (${prompt}, 'active', ${claudeSessionId}, ${sessionName}, ${title || null}, ${JSON.stringify({ root: worktree.path, worktree: sessionName, branch: worktree.branch })})
     RETURNING *
   `;
 

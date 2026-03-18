@@ -5,6 +5,7 @@ export const sql = postgres(process.env.DATABASE_URL!, {
   idle_timeout: 20,
   connect_timeout: 10,
   transform: postgres.camel,
+  connection: { search_path: "public,upend" },
   onnotice: (notice) => console.log("pg:", notice.message),
 });
 

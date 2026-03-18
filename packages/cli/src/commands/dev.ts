@@ -24,6 +24,7 @@ export default async function dev(args: string[]) {
   // start API service
   log.info(`starting api → :${apiPort}`);
   Bun.spawn(["bun", "--watch", `${cliRoot}/src/services/gateway/index.ts`], {
+    cwd: projectDir,
     env: { ...process.env, API_PORT: apiPort, UPEND_PROJECT: projectDir },
     stdout: "inherit",
     stderr: "inherit",
@@ -32,6 +33,7 @@ export default async function dev(args: string[]) {
   // start Claude service
   log.info(`starting claude → :${claudePort}`);
   Bun.spawn(["bun", "--watch", `${cliRoot}/src/services/claude/index.ts`], {
+    cwd: projectDir,
     env: { ...process.env, CLAUDE_PORT: claudePort, UPEND_PROJECT: projectDir },
     stdout: "inherit",
     stderr: "inherit",

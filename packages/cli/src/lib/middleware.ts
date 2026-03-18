@@ -27,7 +27,7 @@ export const requireAuth = createMiddleware<{
     const user = {
       sub: payload.sub as string,
       email: payload.email as string,
-      role: (payload.role as string) || "user",
+      role: (payload.app_role as string) || (payload.role as string) || "user",
     };
     console.log(`[auth] ${user.email} → ${method} ${path}`);
     c.set("user", user);

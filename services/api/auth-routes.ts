@@ -1,8 +1,17 @@
 import { Hono } from "hono";
 import { sql } from "../../lib/db";
-import { signToken, getJWKS } from "../../lib/auth";
+import { signToken, getJWKS, verifyToken } from "../../lib/auth";
 
 export const authRoutes = new Hono();
+
+async function audit(action: string, opts: { actorId?: string; actorEmail?: string; targetType?: string; targetId?: string; detail?: any; ip?: string } = {}) {
+  try {
+    await sql`INSERT INTO audit.log (actor_id, actor_email, action, target_type, target_id, detail, ip)
+      VALUES (${opts.actorId || null}, ${opts.actorEmail || null}, ${action}, ${opts.targetType || null}, ${opts.targetId || null}, ${JSON.stringify(opts.detail || {})}, ${opts.ip || null})`;
+  } catch (err) {
+    console.error("[audit] failed:", err);
+  }
+}
 
 // JWKS endpoint — public, Neon Authorize fetches this to validate JWTs
 authRoutes.get("/.well-known/jwks.json", async (c) => {
@@ -10,8 +19,22 @@ authRoutes.get("/.well-known/jwks.json", async (c) => {
   return c.json(jwks);
 });
 
-// signup
+// signup (disabled by default — admin creates users, or set SIGNUP_ENABLED=true)
 authRoutes.post("/auth/signup", async (c) => {
+  // allow if signup is enabled OR if request has a valid admin token
+  const authHeader = c.req.header("Authorization");
+  let isAdminRequest = false;
+  if (authHeader?.startsWith("Bearer ")) {
+    try {
+      const payload = await import("../../lib/auth").then(m => m.verifyToken(authHeader.slice(7)));
+      if ((payload as any).app_role === "admin") isAdminRequest = true;
+    } catch {}
+  }
+
+  if (process.env.SIGNUP_ENABLED !== "true" && !isAdminRequest) {
+    return c.json({ error: "signup is disabled — contact the admin" }, 403);
+  }
+
   const { email, password, role } = await c.req.json();
   console.log(`[auth] signup attempt: ${email}`);
   if (!email || !password) return c.json({ error: "email and password required" }, 400);
@@ -26,6 +49,7 @@ authRoutes.post("/auth/signup", async (c) => {
     `;
 
     const token = await signToken(user.id, user.email, user.role);
+    await audit("user.signup", { actorId: user.id, actorEmail: user.email, targetType: "user", targetId: user.id });
     return c.json({ user, token }, 201);
   } catch (err: any) {
     if (err.code === "23505") return c.json({ error: "email already exists" }, 409);
@@ -46,10 +70,36 @@ authRoutes.post("/auth/login", async (c) => {
   if (!valid) return c.json({ error: "invalid credentials" }, 401);
 
   const token = await signToken(user.id, user.email, user.role);
+  await audit("user.login", { actorId: user.id, actorEmail: user.email, targetType: "user", targetId: user.id });
   return c.json({
     user: { id: user.id, email: user.email, role: user.role },
     token,
   });
+});
+
+// impersonate — admin only, mint a token as another user
+authRoutes.post("/auth/impersonate", async (c) => {
+  const authHeader = c.req.header("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) return c.json({ error: "unauthorized" }, 401);
+
+  try {
+    const payload = await verifyToken(authHeader.slice(7));
+    if ((payload as any).app_role !== "admin") return c.json({ error: "admin only" }, 403);
+  } catch {
+    return c.json({ error: "invalid token" }, 401);
+  }
+
+  const { user_id } = await c.req.json();
+  if (!user_id) return c.json({ error: "user_id required" }, 400);
+
+  const [user] = await sql`SELECT id, email, role FROM users WHERE id = ${user_id}`;
+  if (!user) return c.json({ error: "user not found" }, 404);
+
+  const token = await signToken(user.id, user.email, user.role);
+  const adminPayload = await verifyToken(authHeader!.slice(7));
+  await audit("user.impersonate", { actorId: (adminPayload as any).sub, actorEmail: (adminPayload as any).email, targetType: "user", targetId: user.id, detail: { impersonated: user.email } });
+  console.log(`[auth] impersonation: admin → ${user.email}`);
+  return c.json({ user, token });
 });
 
 // ---------- SSO / OAuth ----------
@@ -67,7 +117,7 @@ authRoutes.get("/auth/sso/:provider", async (c) => {
 
   // store state for CSRF validation
   await sql`
-    INSERT INTO oauth_states (state, provider, created_at)
+    INSERT INTO upend.oauth_states (state, provider, created_at)
     VALUES (${state}, ${provider}, now())
   `;
 
@@ -95,7 +145,7 @@ authRoutes.get("/auth/sso/:provider/callback", async (c) => {
 
   // validate state
   const [stateRow] = await sql`
-    DELETE FROM oauth_states WHERE state = ${state} AND provider = ${provider}
+    DELETE FROM upend.oauth_states WHERE state = ${state} AND provider = ${provider}
     AND created_at > now() - interval '10 minutes'
     RETURNING *
   `;

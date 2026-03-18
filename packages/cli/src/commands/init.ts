@@ -1,15 +1,19 @@
 import { log } from "../lib/log";
 import { exec, execOrDie, hasCommand } from "../lib/exec";
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
 
 export default async function init(args: string[]) {
   const name = args[0];
   if (!name) {
-    log.error("usage: upend init <name>");
+    log.error("usage: upend init <name> [--admin-email <email> --admin-password <pass>]");
     log.dim("  e.g. upend init beta → deploys to beta.upend.site");
     process.exit(1);
   }
+
+  // parse optional flags
+  const adminEmail = getFlag(args, "--admin-email");
+  const adminPassword = getFlag(args, "--admin-password");
 
   const projectDir = resolve(name);
   const domain = `${name}.upend.site`;
@@ -46,7 +50,14 @@ export default async function init(args: string[]) {
   let neonDataApi = "";
   let neonProjectId = "";
 
-  if (await hasCommand("neonctl")) {
+  if (!(await hasCommand("neonctl"))) {
+    log.error("neonctl is required — install with: npm i -g neonctl");
+    log.dim("upend currently requires Neon Postgres. More database support coming soon.");
+    rmSync(projectDir, { recursive: true, force: true });
+    process.exit(1);
+  }
+
+  {
     // check auth
     const { exitCode } = await exec(["neonctl", "me"], { silent: true });
     if (exitCode !== 0) {
@@ -125,21 +136,16 @@ export default async function init(args: string[]) {
         log.warn("couldn't read neon API token — data API needs manual setup");
       }
     }
-  } else {
-    log.warn("neonctl not found — install with: npm i -g neonctl");
-    log.dim("then re-run: upend init " + name);
-    log.dim("or set DATABASE_URL manually in .env");
   }
 
   // ── 3. scaffold project files ──
 
   log.info("scaffolding project...");
 
-  // resolve @upend/cli dependency
+  // resolve @upend/cli version from our own package.json
   const cliPkgPath = new URL("../../package.json", import.meta.url).pathname;
   const cliPkg = JSON.parse(readFileSync(cliPkgPath, "utf-8"));
-  const cliRoot = join(cliPkgPath, "..");
-  const cliDep = cliPkg.version === "0.1.0" ? `file:${cliRoot}` : `^${cliPkg.version}`;
+  const cliDep = `^${cliPkg.version}`;
 
   writeFile(projectDir, "upend.config.ts", `import { defineConfig } from "@upend/cli";
 
@@ -175,6 +181,7 @@ ANTHROPIC_API_KEY=
 DEPLOY_HOST=
 API_PORT=3001
 CLAUDE_PORT=3002
+SIGNUP_ENABLED=false
 `);
 
   writeFile(projectDir, ".env.example", `DATABASE_URL=postgresql://user:pass@host/db?sslmode=require
@@ -195,11 +202,12 @@ sessions/
 
   // migrations
   mkdirSync(join(projectDir, "migrations"), { recursive: true });
-  writeFile(projectDir, "migrations/001_init.sql", `-- your first migration
-CREATE TABLE IF NOT EXISTS example (
-  id BIGSERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  data JSONB DEFAULT '{}',
+  writeFile(projectDir, "migrations/001_users.sql", `-- users table (exposed via Data API)
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT DEFAULT 'user',
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -207,9 +215,35 @@ CREATE TABLE IF NOT EXISTS example (
 
   // apps + services
   mkdirSync(join(projectDir, "apps"), { recursive: true });
-  writeFile(projectDir, "apps/.gitkeep", "");
+  // copy built-in users app
+  const usersAppSrc = new URL("../apps/users/index.html", import.meta.url).pathname;
+  mkdirSync(join(projectDir, "apps/users"), { recursive: true });
+  writeFileSync(join(projectDir, "apps/users/index.html"), readFileSync(usersAppSrc, "utf-8"));
   mkdirSync(join(projectDir, "services"), { recursive: true });
   writeFile(projectDir, "services/.gitkeep", "");
+
+  // workflows
+  mkdirSync(join(projectDir, "workflows"), { recursive: true });
+  writeFile(projectDir, "workflows/example.ts", `// example workflow — runs on a schedule or manually
+// @cron 0 */6 * * *
+// @description clean up ended sessions older than 7 days
+
+import postgres from "postgres";
+
+const sql = postgres(process.env.DATABASE_URL!);
+
+export async function run() {
+  const deleted = await sql\`
+    DELETE FROM upend.editing_sessions
+    WHERE status = 'ended' AND created_at < now() - interval '7 days'
+    RETURNING id
+  \`;
+  console.log(\`cleaned up \${deleted.length} old sessions\`);
+}
+
+// run directly: bun workflows/example.ts
+run().then(() => process.exit(0));
+`);
 
   // CLAUDE.md
   writeFile(projectDir, "CLAUDE.md", `# ${name}
@@ -238,6 +272,43 @@ Apps talk to Neon Data API at \`/api/data/<table>\`:
 - PATCH \`/api/data/example?id=eq.5\` — update
 - DELETE \`/api/data/example?id=eq.5\` — delete
 All requests need \`Authorization: Bearer <jwt>\` header.
+
+## Access control
+Apps read JWT claims to decide what to show:
+\`\`\`js
+const token = localStorage.getItem('upend_token');
+const claims = JSON.parse(atob(token.split('.')[1]));
+const isAdmin = claims.app_role === 'admin';
+const myId = claims.sub;
+\`\`\`
+
+The data API at \`/api/data/:table\` sets JWT claims as Postgres session variables before each query,
+so RLS policies have access to the current user.
+
+When the user asks for access control, create RLS policies in a migration:
+\`\`\`sql
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects FORCE ROW LEVEL SECURITY;
+
+-- everyone can read
+CREATE POLICY "read" ON projects FOR SELECT USING (true);
+
+-- users can only update their own rows
+CREATE POLICY "update_own" ON projects FOR UPDATE
+  USING (owner_id = current_setting('request.jwt.sub')::uuid);
+
+-- only admins can delete
+CREATE POLICY "admin_delete" ON projects FOR DELETE
+  USING (current_setting('request.jwt.role') = 'admin');
+\`\`\`
+
+Available session variables in RLS policies:
+- \`current_setting('request.jwt.sub')\` — user ID
+- \`current_setting('request.jwt.role')\` — user role (admin/user)
+- \`current_setting('request.jwt.email')\` — user email
+
+The dashboard data tab shows active RLS policies per table so users can see what rules are in place.
+The \`apps/users/\` app is an example of the access control pattern.
 
 ## Conventions
 - Migrations: plain SQL in \`migrations/\`, numbered \`001_name.sql\`
@@ -269,19 +340,73 @@ All requests need \`Authorization: Bearer <jwt>\` header.
   await execOrDie(["bun", "install"], { cwd: projectDir });
   log.success("dependencies installed");
 
+  // ── 7. bootstrap DB + create admin ──
+
+  if (databaseUrl) {
+    // run migrations (bootstrap + user's 001_init.sql which creates users table)
+    log.info("running migrations...");
+    await exec(["bunx", "@dotenvx/dotenvx", "run", "--", "bunx", "upend", "migrate"], { cwd: projectDir });
+    log.success("database ready");
+
+    // prompt: create admin or enable signup?
+    log.blank();
+    process.stdout.write("  create an admin user now? (Y/n): ");
+    const answer = (await readLine()).trim().toLowerCase();
+
+    if (answer === "n" || answer === "no") {
+      // enable signup so they can create accounts from the dashboard
+      log.info("enabling public signup...");
+      await setEnvVar(projectDir, "SIGNUP_ENABLED", "true");
+      log.success("signup enabled — anyone can create an account");
+    } else {
+      // create admin user
+      let email = adminEmail;
+      let password = adminPassword;
+
+      if (!email) {
+        process.stdout.write("  admin email: ");
+        email = (await readLine()).trim();
+      }
+      if (!password) {
+        process.stdout.write("  admin password: ");
+        password = (await readLine()).trim();
+      }
+
+      if (email && password) {
+        log.info("creating admin user...");
+        const postgres = (await import("postgres")).default;
+        const sql = postgres(databaseUrl, { max: 1 });
+        const passwordHash = await Bun.password.hash(password, { algorithm: "argon2id" });
+        try {
+          const [user] = await sql`
+            INSERT INTO users (email, password_hash, role)
+            VALUES (${email}, ${passwordHash}, 'admin')
+            RETURNING id, email, role
+          `;
+          log.success(`admin: ${user.email}`);
+        } catch (err: any) {
+          if (err.code === "23505") {
+            log.warn("admin user already exists");
+          } else {
+            log.warn(`could not create admin: ${err.message}`);
+          }
+        }
+        await sql.end();
+      }
+    }
+  }
+
   // ── done ──
 
   log.blank();
   log.header(`${name} is ready`);
   log.blank();
   log.info(`cd ${name}`);
-  if (!databaseUrl) {
-    log.info("# add your DATABASE_URL to .env");
-  }
   if (!process.env.ANTHROPIC_API_KEY) {
-    log.info("# add your ANTHROPIC_API_KEY to .env");
+    log.info("bunx upend env:set ANTHROPIC_API_KEY <your-key>");
   }
-  log.info("upend dev");
+  log.info("bunx upend migrate");
+  log.info("bunx upend dev");
   log.blank();
   if (databaseUrl) {
     log.dim(`database:  ${neonProjectId}`);
@@ -312,6 +437,34 @@ function writeFile(dir: string, path: string, content: string) {
   const fullPath = join(dir, path);
   mkdirSync(join(fullPath, ".."), { recursive: true });
   writeFileSync(fullPath, content);
+}
+
+async function setEnvVar(projectDir: string, key: string, value: string) {
+  await exec(["bunx", "@dotenvx/dotenvx", "decrypt"], { cwd: projectDir, silent: true });
+  const envFile = readFileSync(join(projectDir, ".env"), "utf-8");
+  const regex = new RegExp(`^${key}=.*$`, "m");
+  const updated = regex.test(envFile)
+    ? envFile.replace(regex, `${key}=${value}`)
+    : envFile.trimEnd() + `\n${key}=${value}\n`;
+  writeFileSync(join(projectDir, ".env"), updated);
+  await exec(["bunx", "@dotenvx/dotenvx", "encrypt"], { cwd: projectDir, silent: true });
+}
+
+function getFlag(args: string[], flag: string): string | undefined {
+  const idx = args.indexOf(flag);
+  return idx !== -1 && args[idx + 1] ? args[idx + 1] : undefined;
+}
+
+function readLine(): Promise<string> {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    stdin.resume();
+    stdin.setEncoding("utf-8");
+    stdin.once("data", (data: string) => {
+      stdin.pause();
+      resolve(data);
+    });
+  });
 }
 
 async function exportKeyToPem(key: CryptoKey, type: "PRIVATE" | "PUBLIC") {

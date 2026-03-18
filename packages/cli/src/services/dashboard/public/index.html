@@ -63,6 +63,12 @@
       <button @click="rightPanel = 'data'"
         :class="rightPanel === 'data' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
         class="px-3 py-1 text-xs rounded cursor-pointer font-mono">data</button>
+      <button @click="rightPanel = 'workflows'; loadWorkflows()"
+        :class="rightPanel === 'workflows' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
+        class="px-3 py-1 text-xs rounded cursor-pointer font-mono">workflows</button>
+      <button @click="rightPanel = 'audit'; loadAuditLog()"
+        :class="rightPanel === 'audit' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
+        class="px-3 py-1 text-xs rounded cursor-pointer font-mono">audit</button>
       <div class="relative" @click.away="appsOpen = false">
         <button @click="appsOpen = !appsOpen; loadApps()"
           :class="rightPanel !== 'data' && rightPanel !== 'home' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
@@ -190,6 +196,25 @@
   </div>
 </div>
 
+<!-- new app modal -->
+<div x-show="showNewAppModal" x-transition class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+  <form @submit.prevent="submitNewApp()"
+    @keydown.escape="showNewAppModal = false"
+    class="bg-surface border border-border rounded-xl p-6 w-96 flex flex-col gap-4">
+    <h3 class="text-accent font-bold text-sm">new app</h3>
+    <input x-model="newAppName" x-ref="newAppNameInput" type="text" placeholder="app name (lowercase, no spaces)"
+      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+    <textarea x-model="newAppDesc" rows="3" placeholder="what should this app do?"
+      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent resize-none"></textarea>
+    <div class="flex gap-2 justify-end">
+      <button type="button" @click="showNewAppModal = false"
+        class="text-muted text-xs px-3 py-1.5 rounded border border-border cursor-pointer hover:text-gray-200 font-mono">cancel</button>
+      <button type="submit" :disabled="!newAppName.trim() || !newAppDesc.trim()"
+        class="bg-accent text-black text-xs px-4 py-1.5 rounded font-bold cursor-pointer disabled:opacity-40 font-mono">create</button>
+    </div>
+  </form>
+</div>
+
 <!-- main panels -->
 <div x-show="token" class="flex-1 flex min-h-0">
   <!-- left: chat (native DOM) -->
@@ -238,8 +263,8 @@
   <!-- right panel -->
   <div class="flex-1 min-h-0 min-w-0 overflow-y-auto" id="panel-right">
     <!-- app iframe -->
-    <iframe x-show="rightPanel !== 'data' && rightPanel !== 'home'" x-ref="rightIframe" class="w-full h-full border-none"
-      :src="token && rightPanel !== 'data' && rightPanel !== 'home' ? appUrl(rightPanel) : 'about:blank'"></iframe>
+    <iframe x-show="!['data','home','workflows','audit'].includes(rightPanel)" x-ref="rightIframe" class="w-full h-full border-none"
+      :src="token && !['data','home','workflows','audit'].includes(rightPanel) ? appUrl(rightPanel) : 'about:blank'"></iframe>
 
     <!-- home panel -->
     <div x-show="rightPanel === 'home'" class="p-8 max-w-2xl mx-auto">
@@ -264,6 +289,87 @@
           <p x-show="apps.length === 0" class="text-muted text-xs">no apps yet — tell claude to build one</p>
         </div>
       </div>
+    </div>
+
+    <!-- audit panel -->
+    <div x-show="rightPanel === 'audit'" class="flex flex-col h-full overflow-y-auto">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+        <span class="text-sm font-bold text-gray-200 font-mono">audit log</span>
+        <button @click="loadAuditLog()" class="text-xs text-muted border border-border px-2 py-1 rounded cursor-pointer hover:text-accent hover:border-accent font-mono">refresh</button>
+      </div>
+
+      <div x-show="auditEntries.length === 0" class="p-8 text-center text-muted text-sm">
+        no audit entries yet
+      </div>
+
+      <table x-show="auditEntries.length > 0" class="w-full text-xs">
+        <thead>
+          <tr class="border-b border-border text-muted sticky top-0 bg-surface">
+            <th class="text-left px-3 py-2 font-normal">time</th>
+            <th class="text-left px-3 py-2 font-normal">actor</th>
+            <th class="text-left px-3 py-2 font-normal">action</th>
+            <th class="text-left px-3 py-2 font-normal">target</th>
+            <th class="text-left px-3 py-2 font-normal">detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="entry in auditEntries" :key="entry.id">
+            <tr class="border-b border-border/50 hover:bg-surface/50">
+              <td class="px-3 py-2 text-muted whitespace-nowrap" x-text="new Date(entry.ts).toLocaleString()"></td>
+              <td class="px-3 py-2 text-gray-200 font-mono" x-text="entry.actorEmail || entry.actorId || '—'"></td>
+              <td class="px-3 py-2">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                  :class="{
+                    'bg-green-500/20 text-green-400': entry.action?.includes('login'),
+                    'bg-blue-500/20 text-blue-400': entry.action?.includes('signup'),
+                    'bg-yellow-500/20 text-yellow-400': entry.action?.includes('impersonate'),
+                    'bg-accent/20 text-accent': entry.action?.includes('session'),
+                    'bg-purple-500/20 text-purple-400': entry.action?.includes('workflow'),
+                    'bg-red-500/20 text-red-400': entry.action?.includes('commit'),
+                  }"
+                  x-text="entry.action"></span>
+              </td>
+              <td class="px-3 py-2 text-muted font-mono" x-text="entry.targetType ? entry.targetType + ':' + (entry.targetId || '') : '—'"></td>
+              <td class="px-3 py-2 text-muted font-mono max-w-[200px] truncate" x-text="entry.detail && Object.keys(entry.detail).length ? JSON.stringify(entry.detail) : ''"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- workflows panel -->
+    <div x-show="rightPanel === 'workflows'" class="flex flex-col h-full overflow-y-auto">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+        <span class="text-sm font-bold text-gray-200 font-mono">workflows</span>
+        <button @click="prompt = 'create a new workflow in workflows/ that '; $refs.chatInput.focus()"
+          class="text-xs text-muted border border-border px-3 py-1 rounded cursor-pointer hover:text-accent hover:border-accent font-mono">+ new workflow</button>
+      </div>
+
+      <div x-show="workflowsList.length === 0" class="p-8 text-center text-muted text-sm">
+        no workflows yet — ask Claude to create one, or add a .ts file to workflows/
+      </div>
+
+      <template x-for="wf in workflowsList" :key="wf.name">
+        <div class="px-4 py-3 border-b border-border/50 hover:bg-surface/50">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-mono text-gray-200" x-text="wf.name"></span>
+              <span x-show="wf.cron" class="text-[10px] text-muted bg-border px-1.5 py-0.5 rounded font-mono" x-text="wf.cron"></span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span x-show="wf._running" class="text-xs text-accent animate-pulse">running...</span>
+              <span x-show="wf._result !== undefined && !wf._running"
+                :class="wf._result === 0 ? 'text-green-400' : 'text-red-400'"
+                class="text-xs" x-text="wf._result === 0 ? 'success' : 'failed'"></span>
+              <button @click="runWorkflow(wf)"
+                :disabled="wf._running"
+                class="text-xs text-muted border border-border px-2 py-1 rounded cursor-pointer hover:text-accent hover:border-accent font-mono disabled:opacity-40">run</button>
+            </div>
+          </div>
+          <p x-show="wf.description" class="text-xs text-muted" x-text="wf.description"></p>
+          <pre x-show="wf._output" class="mt-2 text-[11px] text-gray-400 bg-bg rounded p-2 overflow-x-auto font-mono max-h-32 overflow-y-auto" x-text="wf._output"></pre>
+        </div>
+      </template>
     </div>
 
     <!-- data panel -->
@@ -360,6 +466,48 @@
                 </table>
               </div>
             </div>
+
+            <!-- RLS policies -->
+            <div class="border-t border-border">
+              <div class="px-4 py-2 text-xs border-b border-border flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="text-muted">access policies</span>
+                  <span x-show="tablePolicies.length > 0" class="text-muted" x-text="'(' + tablePolicies.length + ')'"></span>
+                </div>
+                <span x-show="tableRLSEnabled" class="text-green-500 text-xs">RLS enabled</span>
+                <span x-show="!tableRLSEnabled" class="text-muted text-xs">RLS not enabled</span>
+              </div>
+
+              <div x-show="tablePolicies.length === 0" class="px-4 py-4 text-xs text-muted">
+                <p>no policies — all authenticated users have full access.</p>
+                <button @click="prompt = 'enable RLS on the ' + selectedTable + ' table with sensible default policies: everyone can read, users can only update/delete their own rows (by owner_id or id), admins can do everything'; $refs.chatInput.focus()"
+                  class="mt-2 text-accent hover:underline cursor-pointer">+ add default policies</button>
+              </div>
+
+              <template x-for="p in tablePolicies" :key="p.policy">
+                <div class="px-4 py-2.5 border-b border-border/50 hover:bg-surface/50">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="font-mono text-xs text-gray-200" x-text="p.policy"></span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                      :class="{
+                        'bg-green-500/20 text-green-400': p.operation === 'SELECT',
+                        'bg-blue-500/20 text-blue-400': p.operation === 'INSERT',
+                        'bg-yellow-500/20 text-yellow-400': p.operation === 'UPDATE',
+                        'bg-red-500/20 text-red-400': p.operation === 'DELETE',
+                        'bg-accent/20 text-accent': p.operation === 'ALL',
+                      }"
+                      x-text="p.operation"></span>
+                    <span class="text-[10px] text-muted" x-text="p.permissive === 'PERMISSIVE' ? '' : 'RESTRICTIVE'"></span>
+                  </div>
+                  <div x-show="p.usingExpr" class="text-[11px] text-muted font-mono">
+                    <span class="text-muted/60">USING</span> <span class="text-gray-400" x-text="p.usingExpr"></span>
+                  </div>
+                  <div x-show="p.checkExpr" class="text-[11px] text-muted font-mono">
+                    <span class="text-muted/60">CHECK</span> <span class="text-gray-400" x-text="p.checkExpr"></span>
+                  </div>
+                </div>
+              </template>
+            </div>
           </div>
         </div>
       </div>
@@ -385,6 +533,9 @@ function dashboard() {
     showSessionModal: false,
     showCloseModal: false,
     showPublishModal: false,
+    showNewAppModal: false,
+    newAppName: '',
+    newAppDesc: '',
     sessionTitle: '',
     _pendingPrompt: '',
 
@@ -403,6 +554,12 @@ function dashboard() {
     tableColumns: [],
     sampleRows: [],
     sampleRowKeys: [],
+    tablePolicies: [],
+    tableRLSEnabled: false,
+    allPolicies: [],
+    allRLSTables: [],
+    workflowsList: [],
+    auditEntries: [],
     rightPanel: 'home',
     apps: [],
     appsOpen: false,
@@ -741,6 +898,13 @@ function dashboard() {
       try {
         const res = await this.authFetch('/api/tables');
         if (res.ok) this.tables = (await res.json()).map(t => t.name);
+        // load policies for all tables
+        const polRes = await this.authFetch('/api/policies');
+        if (polRes.ok) {
+          const data = await polRes.json();
+          this.allPolicies = data.policies || [];
+          this.allRLSTables = (data.rlsTables || []).map(t => t.table);
+        }
       } catch {}
     },
 
@@ -749,13 +913,15 @@ function dashboard() {
       this.tableColumns = [];
       this.sampleRows = [];
       this.sampleRowKeys = [];
+      this.tablePolicies = this.allPolicies.filter(p => p.table === name);
+      this.tableRLSEnabled = this.allRLSTables.includes(name);
       try {
         // fetch columns
         const colRes = await this.authFetch(`/api/tables/${name}`);
         if (colRes.ok) this.tableColumns = await colRes.json();
 
-        // fetch sample rows via Neon Data API
-        const dataRes = await this.authFetch(`/api/data/${name}?limit=5&order=id.desc`);
+        // fetch sample rows
+        const dataRes = await this.authFetch(`/api/data/${name}?limit=5&order=created_at.desc`);
         if (dataRes.ok) {
           const rows = await dataRes.json();
           this.sampleRows = rows;
@@ -826,19 +992,54 @@ function dashboard() {
 
     createNewApp() {
       this.appsOpen = false;
-      const name = window.prompt('app name (lowercase, no spaces):');
-      if (!name) return;
-      const desc = window.prompt('what should this app do?');
-      if (!desc) return;
+      this.newAppName = '';
+      this.newAppDesc = '';
+      this.showNewAppModal = true;
+      this.$nextTick(() => this.$refs.newAppNameInput?.focus());
+    },
+
+    submitNewApp() {
+      const name = this.newAppName.trim().toLowerCase().replace(/\s+/g, '-');
+      const desc = this.newAppDesc.trim();
+      if (!name || !desc) return;
+      this.showNewAppModal = false;
       this.prompt = `create an app called "${name}" in apps/${name}/. ${desc}`;
       this.sendPrompt();
     },
 
+    async loadAuditLog() {
+      try {
+        const res = await this.authFetch('/api/audit?limit=100');
+        if (res.ok) this.auditEntries = await res.json();
+      } catch {}
+    },
+
+    async loadWorkflows() {
+      try {
+        const res = await this.authFetch('/api/workflows');
+        if (res.ok) this.workflowsList = (await res.json()).map(w => ({ ...w, _running: false, _result: undefined, _output: '' }));
+      } catch {}
+    },
+
+    async runWorkflow(wf) {
+      wf._running = true;
+      wf._result = undefined;
+      wf._output = '';
+      try {
+        const res = await this.authFetch(`/api/workflows/${wf.name}/run`, { method: 'POST' });
+        const data = await res.json();
+        wf._result = data.exitCode;
+        wf._output = (data.stdout || '') + (data.stderr ? '\n' + data.stderr : '');
+      } catch (err) {
+        wf._result = 1;
+        wf._output = err.message;
+      }
+      wf._running = false;
+    },
+
     refreshRightPanel() {
-      // refresh app iframe if showing
       const iframe = this.$refs.rightIframe;
       if (iframe?.src && iframe.src !== 'about:blank') iframe.src = iframe.src;
-      // refresh data panel if showing
       this.loadTables();
       if (this.selectedTable) this.selectTable(this.selectedTable);
     },

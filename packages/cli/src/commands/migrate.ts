@@ -2,13 +2,15 @@ import { log } from "../lib/log";
 import { readdirSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 
+// bootstrap SQL lives in the package — framework tables
+const bootstrapPath = new URL("../lib/bootstrap.sql", import.meta.url).pathname;
+
 export default async function migrate(args: string[]) {
   const projectDir = resolve(".");
   const migrationsDir = join(projectDir, "migrations");
 
   log.header("running migrations");
 
-  // dynamic import postgres from the project's node_modules
   const postgres = (await import("postgres")).default;
   const sql = postgres(process.env.DATABASE_URL!, {
     max: 1,
@@ -16,14 +18,13 @@ export default async function migrate(args: string[]) {
   });
 
   try {
-    // ensure migrations table
-    await sql`
-      CREATE TABLE IF NOT EXISTS _migrations (
-        name TEXT PRIMARY KEY,
-        ran_at TIMESTAMPTZ DEFAULT now()
-      )
-    `;
+    // 1. bootstrap framework tables (idempotent)
+    log.info("bootstrapping framework tables...");
+    const bootstrap = readFileSync(bootstrapPath, "utf-8");
+    await sql.unsafe(bootstrap);
+    log.success("framework tables ready");
 
+    // 2. run user migrations
     const ran = new Set(
       (await sql`SELECT name FROM _migrations`).map((r: any) => r.name)
     );
@@ -35,7 +36,8 @@ export default async function migrate(args: string[]) {
         .sort();
     } catch {
       log.warn("no migrations directory found");
-      process.exit(0);
+      await sql.end();
+      return;
     }
 
     let count = 0;

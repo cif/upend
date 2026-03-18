@@ -59,8 +59,8 @@ app.post("/sessions", async (c) => {
 
   const activeSessions = await sql`
     SELECT es.*,
-      (SELECT sm.content FROM session_messages sm WHERE sm.session_id = es.id ORDER BY sm.created_at DESC LIMIT 1) as last_message
-    FROM editing_sessions es WHERE es.status = 'active' ORDER BY es.created_at DESC
+      (SELECT sm.content FROM upend.session_messages sm WHERE sm.session_id = es.id ORDER BY sm.created_at DESC LIMIT 1) as last_message
+    FROM upend.editing_sessions es WHERE es.status = 'active' ORDER BY es.created_at DESC
   `;
 
   if (activeSessions.length > 0 && !force) {
@@ -87,13 +87,13 @@ app.post("/sessions", async (c) => {
   const claudeSessionId = crypto.randomUUID();
 
   const [session] = await sql`
-    INSERT INTO editing_sessions (prompt, status, claude_session_id, snapshot_name, title, context)
+    INSERT INTO upend.editing_sessions (prompt, status, claude_session_id, snapshot_name, title, context)
     VALUES (${prompt}, 'active', ${claudeSessionId}, ${sessionName}, ${title || null}, ${JSON.stringify({ root: worktree.path, worktree: sessionName, branch: worktree.branch })})
     RETURNING *
   `;
 
   const [msg] = await sql`
-    INSERT INTO session_messages (session_id, role, content, status)
+    INSERT INTO upend.session_messages (session_id, role, content, status)
     VALUES (${session.id}, 'user', ${prompt}, 'pending')
     RETURNING *
   `;
@@ -108,17 +108,17 @@ app.post("/sessions/:id/messages", async (c) => {
   const { prompt } = await c.req.json();
   if (!prompt) return c.json({ error: "prompt is required" }, 400);
 
-  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${sessionId}`;
+  const [session] = await sql`SELECT * FROM upend.editing_sessions WHERE id = ${sessionId}`;
   if (!session) return c.json({ error: "session not found" }, 404);
   if (session.status !== "active") return c.json({ error: `session is ${session.status}` }, 400);
 
   const [running] = await sql`
-    SELECT id FROM session_messages WHERE session_id = ${sessionId} AND status = 'running'
+    SELECT id FROM upend.session_messages WHERE session_id = ${sessionId} AND status = 'running'
   `;
   if (running) return c.json({ error: "a message is already running" }, 409);
 
   const [msg] = await sql`
-    INSERT INTO session_messages (session_id, role, content, status)
+    INSERT INTO upend.session_messages (session_id, role, content, status)
     VALUES (${sessionId}, 'user', ${prompt}, 'pending')
     RETURNING *
   `;
@@ -133,20 +133,20 @@ app.post("/sessions/:id/messages", async (c) => {
 
 app.get("/sessions/:id", async (c) => {
   const id = c.req.param("id");
-  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${id}`;
+  const [session] = await sql`SELECT * FROM upend.editing_sessions WHERE id = ${id}`;
   if (!session) return c.json({ error: "not found" }, 404);
-  const messages = await sql`SELECT * FROM session_messages WHERE session_id = ${id} ORDER BY created_at`;
+  const messages = await sql`SELECT * FROM upend.session_messages WHERE session_id = ${id} ORDER BY created_at`;
   return c.json({ ...session, messages });
 });
 
 app.get("/sessions", async (c) => {
-  const rows = await sql`SELECT * FROM editing_sessions ORDER BY created_at DESC LIMIT 50`;
+  const rows = await sql`SELECT * FROM upend.editing_sessions ORDER BY created_at DESC LIMIT 50`;
   return c.json(rows);
 });
 
 app.post("/sessions/:id/end", async (c) => {
   const id = c.req.param("id");
-  await sql`UPDATE editing_sessions SET status = 'ended' WHERE id = ${id}`;
+  await sql`UPDATE upend.editing_sessions SET status = 'ended' WHERE id = ${id}`;
   activeProcesses.delete(Number(id));
   return c.json({ ended: true });
 });
@@ -157,7 +157,7 @@ app.post("/sessions/:id/kill", async (c) => {
   if (!proc) return c.json({ error: "nothing running" }, 404);
   proc.kill();
   activeProcesses.delete(id);
-  await sql`UPDATE session_messages SET status = 'killed' WHERE session_id = ${id} AND status = 'running'`;
+  await sql`UPDATE upend.session_messages SET status = 'killed' WHERE session_id = ${id} AND status = 'running'`;
   broadcast(id, { type: "status", status: "killed" });
   return c.json({ killed: true });
 });
@@ -167,7 +167,7 @@ app.post("/sessions/:id/kill", async (c) => {
 // check if a session can merge cleanly
 app.get("/sessions/:id/mergeable", async (c) => {
   const id = c.req.param("id");
-  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${id}`;
+  const [session] = await sql`SELECT * FROM upend.editing_sessions WHERE id = ${id}`;
   if (!session) return c.json({ error: "not found" }, 404);
 
   const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
@@ -187,7 +187,7 @@ app.get("/sessions/:id/mergeable", async (c) => {
 app.post("/sessions/:id/commit", async (c) => {
   const id = c.req.param("id");
   const user = c.get("user") as { sub: string; email: string };
-  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${id}`;
+  const [session] = await sql`SELECT * FROM upend.editing_sessions WHERE id = ${id}`;
   if (!session) return c.json({ error: "not found" }, 404);
   if (session.status !== "active") return c.json({ error: `session is ${session.status}` }, 400);
 
@@ -206,7 +206,7 @@ app.post("/sessions/:id/commit", async (c) => {
     }
 
     // mark session as committed
-    await sql`UPDATE editing_sessions SET status = 'committed' WHERE id = ${id}`;
+    await sql`UPDATE upend.editing_sessions SET status = 'committed' WHERE id = ${id}`;
 
     // restart live services so changes take effect
     restartServices();
@@ -310,7 +310,7 @@ async function runMessage(
   cwd: string = PROJECT_ROOT
 ) {
   try {
-    await sql`UPDATE session_messages SET status = 'running' WHERE id = ${messageId}`;
+    await sql`UPDATE upend.session_messages SET status = 'running' WHERE id = ${messageId}`;
     broadcast(sessionId, { type: "status", status: "running", messageId });
     console.log(`[claude:${sessionId}] message ${messageId} → running (user: ${user.email})`);
 
@@ -383,7 +383,7 @@ async function runMessage(
               if (block.type === "text") {
                 resultText += block.text;
                 // update DB with partial result as it streams
-                await sql`UPDATE session_messages SET result = ${resultText} WHERE id = ${messageId}`;
+                await sql`UPDATE upend.session_messages SET result = ${resultText} WHERE id = ${messageId}`;
                 broadcast(sessionId, { type: "text", text: block.text, messageId });
               } else if (block.type === "tool_use") {
                 broadcast(sessionId, { type: "tool_use", name: block.name, input: block.input, messageId });
@@ -419,12 +419,12 @@ async function runMessage(
       const errMsg = `claude error: ${errorDetail}`;
       console.error(`[claude:${sessionId}] FULL OUTPUT:\n${fullOutput}`);
       console.error(`[claude:${sessionId}] ERROR: ${errMsg}`);
-      await sql`UPDATE session_messages SET status = 'error', result = ${errMsg} WHERE id = ${messageId}`;
+      await sql`UPDATE upend.session_messages SET status = 'error', result = ${errMsg} WHERE id = ${messageId}`;
       broadcast(sessionId, { type: "status", status: "error", error: errMsg, messageId });
       return;
     }
 
-    await sql`UPDATE session_messages SET status = 'complete', result = ${resultText} WHERE id = ${messageId}`;
+    await sql`UPDATE upend.session_messages SET status = 'complete', result = ${resultText} WHERE id = ${messageId}`;
     broadcast(sessionId, { type: "status", status: "complete", messageId });
     console.log(`[claude:${sessionId}] complete: "${resultText.slice(0, 100)}"`);
 
@@ -433,7 +433,7 @@ async function runMessage(
   } catch (err: any) {
     console.error(`[claude:${sessionId}] EXCEPTION:`, err);
     activeProcesses.delete(sessionId);
-    await sql`UPDATE session_messages SET status = 'error', result = ${err.message} WHERE id = ${messageId}`;
+    await sql`UPDATE upend.session_messages SET status = 'error', result = ${err.message} WHERE id = ${messageId}`;
     broadcast(sessionId, { type: "status", status: "error", error: err.message, messageId });
   }
 }

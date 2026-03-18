@@ -193,6 +193,40 @@ Neon needs to reach your JWKS URL to validate JWTs for the Data API. After your 
 bunx upend setup:jwks
 ```
 
+### Operations
+
+```bash
+# check service health, disk, memory, cron jobs
+bunx upend status
+
+# tail logs (all services, or pick one)
+bunx upend logs
+bunx upend logs api
+bunx upend logs claude
+bunx upend logs -f              # follow in realtime
+
+# SSH into the remote instance
+bunx upend ssh                  # interactive shell, cd'd to project
+bunx upend ssh "bun -v"         # run a command
+```
+
+### Workflows
+
+Workflows are TypeScript files in `workflows/` that run on a cron schedule or manually:
+
+```bash
+# list workflows and their schedules
+bunx upend workflows
+
+# run one manually
+bunx upend workflows run cleanup-sessions
+
+# install cron schedules (also happens on deploy)
+bunx upend workflows install
+```
+
+Workflows are also visible in the dashboard with a manual trigger button.
+
 ## CLI Commands
 
 | Command | What |
@@ -201,6 +235,11 @@ bunx upend setup:jwks
 | `upend dev` | Start gateway + claude + caddy locally |
 | `upend migrate` | Run SQL migrations from `migrations/` |
 | `upend deploy` | rsync to remote, install, migrate, restart |
+| `upend status` | Check remote service health |
+| `upend logs [service]` | Tail remote logs (`-f` to follow) |
+| `upend ssh [cmd]` | SSH into remote instance |
+| `upend workflows` | List, run, or install workflow cron schedules |
+| `upend env:set <K> <V>` | Set an env var (decrypts, sets, re-encrypts) |
 | `upend infra:aws` | Provision an EC2 instance |
 
 ## Config

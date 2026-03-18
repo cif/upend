@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>users</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { theme: { extend: { colors: { bg: '#0a0a0a', surface: '#141414', border: '#262626', accent: '#f97316', muted: '#737373' } } } }</script>
+  <style>body { background: #0a0a0a; font-family: ui-monospace, monospace; }</style>
+</head>
+<body class="text-gray-200 min-h-screen p-6">
+  <div class="max-w-4xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-accent font-bold text-lg">users</h1>
+      <div class="flex items-center gap-3">
+        <span id="my-info" class="text-xs text-muted"></span>
+        <button id="btn-add" onclick="showModal('add')" class="bg-accent text-black text-xs px-3 py-1.5 rounded font-bold cursor-pointer hidden">+ add user</button>
+      </div>
+    </div>
+
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-muted text-xs text-left border-b border-border">
+          <th class="pb-2 font-normal">email</th>
+          <th class="pb-2 font-normal">role</th>
+          <th class="pb-2 font-normal">created</th>
+          <th class="pb-2 font-normal w-40"></th>
+        </tr>
+      </thead>
+      <tbody id="users-table"></tbody>
+    </table>
+  </div>
+
+  <!-- edit modal -->
+  <div id="edit-modal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 hidden" onclick="if(event.target===this)hideModal('edit')">
+    <form onsubmit="saveUser(event)" class="bg-surface border border-border rounded-xl p-6 w-96 flex flex-col gap-4">
+      <h3 class="text-accent font-bold text-sm" id="edit-title">edit user</h3>
+      <input id="edit-email" type="email" placeholder="email"
+        class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+      <div id="edit-role-wrap">
+        <select id="edit-role"
+          class="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+          <option value="user">user</option>
+          <option value="admin">admin</option>
+        </select>
+      </div>
+      <input type="hidden" id="edit-id">
+      <div class="flex gap-2 justify-end">
+        <button type="button" onclick="hideModal('edit')"
+          class="text-muted text-xs px-3 py-1.5 rounded border border-border cursor-pointer hover:text-gray-200 font-mono">cancel</button>
+        <button type="submit"
+          class="bg-accent text-black text-xs px-4 py-1.5 rounded font-bold cursor-pointer font-mono">save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- add modal -->
+  <div id="add-modal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 hidden" onclick="if(event.target===this)hideModal('add')">
+    <form onsubmit="addUser(event)" class="bg-surface border border-border rounded-xl p-6 w-96 flex flex-col gap-4">
+      <h3 class="text-accent font-bold text-sm">add user</h3>
+      <input id="add-email" type="email" placeholder="email" required
+        class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+      <input id="add-password" type="password" placeholder="password" required
+        class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+      <select id="add-role"
+        class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+        <option value="user">user</option>
+        <option value="admin">admin</option>
+      </select>
+      <div class="flex gap-2 justify-end">
+        <button type="button" onclick="hideModal('add')"
+          class="text-muted text-xs px-3 py-1.5 rounded border border-border cursor-pointer hover:text-gray-200 font-mono">cancel</button>
+        <button type="submit"
+          class="bg-accent text-black text-xs px-4 py-1.5 rounded font-bold cursor-pointer font-mono">create</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- impersonation banner -->
+  <div id="imp-banner" class="fixed top-0 left-0 right-0 bg-yellow-500/20 border-b border-yellow-500/50 text-yellow-400 text-xs text-center py-1.5 z-50 hidden font-mono">
+    viewing as <span id="imp-email"></span>
+    <button onclick="exitImpersonation()" class="ml-3 underline cursor-pointer">exit</button>
+  </div>
+
+<script>
+const token = localStorage.getItem('upend_token');
+if (!token) window.location.href = '/';
+
+const claims = JSON.parse(atob(token.split('.')[1]));
+const isAdmin = claims.app_role === 'admin';
+const myId = claims.sub;
+
+// impersonation check
+const realToken = localStorage.getItem('upend_real_token');
+if (realToken) {
+  document.getElementById('imp-banner').classList.remove('hidden');
+  document.getElementById('imp-email').textContent = claims.email;
+}
+
+document.getElementById('my-info').textContent = `${claims.email} (${claims.app_role || 'user'})`;
+if (isAdmin) document.getElementById('btn-add').classList.remove('hidden');
+
+const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+async function api(url, opts = {}) {
+  const res = await fetch(url, { headers, ...opts });
+  if (res.status === 401) { localStorage.removeItem('upend_token'); window.location.href = '/'; }
+  return res;
+}
+
+async function load() {
+  // everyone sees all users
+  const res = await api('/api/data/users?select=id,email,role,created_at&order=created_at.desc');
+  if (!res.ok) { console.error('failed to load users', await res.text()); return; }
+  const users = await res.json();
+  render(users);
+}
+
+function render(users) {
+  document.getElementById('users-table').innerHTML = users.map(u => {
+    const isMe = u.id === myId;
+    const canEdit = isMe || isAdmin;
+    return `
+    <tr class="border-b border-border/50 hover:bg-surface/50">
+      <td class="py-2.5">${u.email} ${isMe ? '<span class="text-accent text-xs">(you)</span>' : ''}</td>
+      <td class="py-2.5">
+        <span class="px-2 py-0.5 rounded text-xs ${u.role === 'admin' ? 'bg-accent/20 text-accent' : 'bg-border text-muted'}">${u.role}</span>
+      </td>
+      <td class="py-2.5 text-muted text-xs">${new Date(u.created_at).toLocaleDateString()}</td>
+      <td class="py-2.5 text-right space-x-2">
+        ${canEdit ? `<button onclick='editUser(${JSON.stringify(u).replace(/'/g, "&#39;")})' class="text-muted text-xs hover:text-gray-200 cursor-pointer">edit</button>` : ''}
+        ${isAdmin && !isMe ? `<button onclick='impersonate("${u.id}")' class="text-muted text-xs hover:text-yellow-400 cursor-pointer">impersonate</button>` : ''}
+        ${isAdmin && !isMe ? `<button onclick='deleteUser("${u.id}")' class="text-muted text-xs hover:text-red-400 cursor-pointer">delete</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function showModal(name) {
+  document.getElementById(name + '-modal').classList.remove('hidden');
+  const input = document.getElementById(name + '-email');
+  if (input) setTimeout(() => input.focus(), 50);
+}
+function hideModal(name) { document.getElementById(name + '-modal').classList.add('hidden'); }
+
+function editUser(user) {
+  const isMe = user.id === myId;
+  document.getElementById('edit-id').value = user.id;
+  document.getElementById('edit-email').value = user.email;
+  document.getElementById('edit-email').readOnly = !isAdmin && !isMe;
+  document.getElementById('edit-role').value = user.role;
+  document.getElementById('edit-title').textContent = isMe ? 'my profile' : 'edit user';
+
+  // only admins can change role, and not their own
+  const roleWrap = document.getElementById('edit-role-wrap');
+  if (!isAdmin || isMe) {
+    roleWrap.innerHTML = `<input type="text" value="${user.role}" readonly class="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-400 font-mono">`;
+  } else {
+    roleWrap.innerHTML = `<select id="edit-role" class="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+      <option value="user" ${user.role === 'user' ? 'selected' : ''}>user</option>
+      <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>admin</option>
+    </select>`;
+  }
+  showModal('edit');
+}
+
+async function saveUser(e) {
+  e.preventDefault();
+  const id = document.getElementById('edit-id').value;
+  const email = document.getElementById('edit-email').value;
+  const roleEl = document.getElementById('edit-role');
+  const body = { email };
+  if (roleEl && roleEl.tagName === 'SELECT') body.role = roleEl.value;
+  await api(`/api/data/users?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  hideModal('edit');
+  load();
+}
+
+async function addUser(e) {
+  e.preventDefault();
+  const res = await api('/api/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: document.getElementById('add-email').value,
+      password: document.getElementById('add-password').value,
+      role: document.getElementById('add-role').value,
+    }),
+  });
+  if (res.ok) { hideModal('add'); load(); }
+  else { const err = await res.json(); alert(err.error || 'failed'); }
+}
+
+async function deleteUser(id) {
+  if (!confirm('delete this user?')) return;
+  await api(`/api/data/users?id=eq.${id}`, { method: 'DELETE' });
+  load();
+}
+
+async function impersonate(userId) {
+  const res = await api('/api/auth/impersonate', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (res.ok) {
+    const { token: newToken } = await res.json();
+    localStorage.setItem('upend_real_token', token);
+    localStorage.setItem('upend_token', newToken);
+    window.location.reload();
+  } else {
+    const err = await res.json();
+    alert(err.error || 'impersonation failed');
+  }
+}
+
+function exitImpersonation() {
+  const real = localStorage.getItem('upend_real_token');
+  if (real) {
+    localStorage.setItem('upend_token', real);
+    localStorage.removeItem('upend_real_token');
+    window.location.reload();
+  }
+}
+
+load();
+</script>
+</body>
+</html>

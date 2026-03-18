@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Goodbye</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a0a;
+      color: #e5e5e5;
+      font-family: 'Courier New', Courier, monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    h1 { font-size: 1rem; color: #555; letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 3rem; }
+
+    #card {
+      text-align: center;
+      margin-bottom: 3rem;
+      min-height: 8rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    #phrase {
+      font-size: clamp(2rem, 8vw, 4rem);
+      color: #f97316;
+      line-height: 1.1;
+    }
+    #romanization { font-size: 1rem; color: #888; }
+    #language { font-size: 0.8rem; color: #444; letter-spacing: 0.15em; text-transform: uppercase; margin-top: 0.5rem; }
+    #loading { color: #444; font-size: 1.5rem; }
+
+    .actions {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button {
+      background: transparent;
+      border: 1px solid #333;
+      color: #e5e5e5;
+      font-family: inherit;
+      font-size: 0.85rem;
+      padding: 0.6rem 1.4rem;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    button:hover { border-color: #f97316; color: #f97316; }
+    button.primary { border-color: #f97316; color: #f97316; }
+    button.primary:hover { background: #f97316; color: #0a0a0a; }
+
+    /* modal */
+    #modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.85);
+      align-items: center; justify-content: center;
+    }
+    #modal-overlay.open { display: flex; }
+    #modal {
+      background: #111;
+      border: 1px solid #222;
+      padding: 2rem;
+      width: min(480px, 90vw);
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    #modal h2 { font-size: 0.85rem; color: #f97316; letter-spacing: 0.15em; text-transform: uppercase; }
+    label { font-size: 0.75rem; color: #666; letter-spacing: 0.1em; text-transform: uppercase; }
+    input {
+      background: #0a0a0a;
+      border: 1px solid #333;
+      color: #e5e5e5;
+      font-family: inherit;
+      font-size: 0.9rem;
+      padding: 0.5rem 0.75rem;
+      width: 100%;
+      outline: none;
+    }
+    input:focus { border-color: #f97316; }
+    .field { display: flex; flex-direction: column; gap: 0.4rem; }
+    .modal-actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 0.5rem; }
+    #suggest-btn { align-self: flex-start; margin-top: -0.25rem; }
+    #error-msg { color: #ef4444; font-size: 0.8rem; min-height: 1rem; }
+    #success-msg { color: #22c55e; font-size: 0.8rem; min-height: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>goodbye</h1>
+
+  <div id="card">
+    <span id="loading">…</span>
+    <span id="phrase" style="display:none"></span>
+    <span id="romanization" style="display:none"></span>
+    <span id="language" style="display:none"></span>
+  </div>
+
+  <div class="actions">
+    <button class="primary" onclick="loadRandom()">another one</button>
+    <button onclick="openModal()">+ add language</button>
+  </div>
+
+  <!-- add language modal -->
+  <div id="modal-overlay">
+    <div id="modal">
+      <h2>Add a goodbye</h2>
+
+      <div class="field">
+        <label>Language</label>
+        <input id="input-language" type="text" placeholder="e.g. French" autocomplete="off" />
+      </div>
+
+      <div class="field">
+        <label>Phrase</label>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <input id="input-phrase" type="text" placeholder="e.g. Au revoir" style="flex:1" />
+          <button id="suggest-btn" onclick="suggestTranslation()" style="white-space:nowrap">suggest →</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Romanization <span style="color:#444">(optional)</span></label>
+        <input id="input-romanization" type="text" placeholder="pronunciation hint for non-latin scripts" />
+      </div>
+
+      <div id="error-msg"></div>
+      <div id="success-msg"></div>
+
+      <div class="modal-actions">
+        <button onclick="closeModal()">cancel</button>
+        <button class="primary" onclick="addGoodbye()">save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '/api';
+
+    function token() { return localStorage.getItem('upend_token'); }
+
+    async function loadRandom() {
+      document.getElementById('loading').style.display = '';
+      document.getElementById('phrase').style.display = 'none';
+      document.getElementById('romanization').style.display = 'none';
+      document.getElementById('language').style.display = 'none';
+
+      const res = await fetch(`${API}/goodbyes/random`);
+      if (!res.ok) { document.getElementById('loading').textContent = 'nothing yet'; return; }
+      const row = await res.json();
+
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('phrase').textContent = row.phrase;
+      document.getElementById('phrase').style.display = '';
+      if (row.romanization) {
+        document.getElementById('romanization').textContent = row.romanization;
+        document.getElementById('romanization').style.display = '';
+      }
+      document.getElementById('language').textContent = row.language;
+      document.getElementById('language').style.display = '';
+    }
+
+    function openModal() {
+      document.getElementById('modal-overlay').classList.add('open');
+      document.getElementById('input-language').focus();
+      document.getElementById('error-msg').textContent = '';
+      document.getElementById('success-msg').textContent = '';
+    }
+    function closeModal() {
+      document.getElementById('modal-overlay').classList.remove('open');
+      document.getElementById('input-language').value = '';
+      document.getElementById('input-phrase').value = '';
+      document.getElementById('input-romanization').value = '';
+    }
+
+    document.getElementById('modal-overlay').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('modal-overlay')) closeModal();
+    });
+
+    async function suggestTranslation() {
+      const lang = document.getElementById('input-language').value.trim();
+      if (!lang) { document.getElementById('error-msg').textContent = 'enter a language first'; return; }
+      const btn = document.getElementById('suggest-btn');
+      btn.textContent = '…';
+      btn.disabled = true;
+      document.getElementById('error-msg').textContent = '';
+
+      const res = await fetch(`${API}/goodbyes/suggest?language=${encodeURIComponent(lang)}`, {
+        headers: { 'Authorization': `Bearer ${token()}` }
+      });
+      btn.textContent = 'suggest →';
+      btn.disabled = false;
+
+      if (!res.ok) {
+        const err = await res.json();
+        document.getElementById('error-msg').textContent = err.error || 'suggestion failed';
+        return;
+      }
+      const data = await res.json();
+      document.getElementById('input-phrase').value = data.phrase;
+    }
+
+    async function addGoodbye() {
+      const language = document.getElementById('input-language').value.trim();
+      const phrase = document.getElementById('input-phrase').value.trim();
+      const romanization = document.getElementById('input-romanization').value.trim() || null;
+      document.getElementById('error-msg').textContent = '';
+      document.getElementById('success-msg').textContent = '';
+
+      if (!language || !phrase) {
+        document.getElementById('error-msg').textContent = 'language and phrase are required';
+        return;
+      }
+
+      const res = await fetch(`${API}/data/goodbyes`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ language, phrase, romanization })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        document.getElementById('error-msg').textContent = err.error || 'save failed';
+        return;
+      }
+
+      document.getElementById('success-msg').textContent = `"${phrase}" saved!`;
+      setTimeout(() => { closeModal(); loadRandom(); }, 800);
+    }
+
+    loadRandom();
+  </script>
+</body>
+</html>

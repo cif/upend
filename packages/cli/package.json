@@ -1,6 +1,6 @@
 {
   "name": "@upend/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Anti-SaaS stack. Deploy live apps with Claude, Postgres, and rsync.",
   "type": "module",
   "bin": {

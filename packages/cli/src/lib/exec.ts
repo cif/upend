@@ -23,13 +23,13 @@ export async function exec(
   return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode };
 }
 
-export async function execOrDie(cmd: string[], opts: { cwd?: string } = {}): Promise<string> {
+export async function execOrDie(cmd: string[], opts: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string }> {
   const { stdout, exitCode, stderr } = await exec(cmd, opts);
   if (exitCode !== 0) {
     log.error(stderr || `${cmd.join(" ")} failed`);
     process.exit(1);
   }
-  return stdout;
+  return { stdout, stderr };
 }
 
 export async function hasCommand(name: string): Promise<boolean> {

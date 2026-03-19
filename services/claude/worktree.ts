@@ -1,6 +1,6 @@
 // git worktree management for isolated editing sessions
 
-const PROJECT_ROOT = process.env.UPEND_ROOT || process.cwd();
+const PROJECT_ROOT = process.env.UPEND_PROJECT || process.cwd();
 const SESSIONS_DIR = `${PROJECT_ROOT}/sessions`;
 
 // word lists for generating session names
@@ -52,11 +52,10 @@ export async function createWorktree(name: string): Promise<{ path: string; bran
     throw new Error(`failed to create worktree: ${result.stderr}`);
   }
 
-  // copy node_modules symlink so bun works in the worktree
+  // copy gitignored files the worktree needs
   await Bun.spawn(["ln", "-sf", `${PROJECT_ROOT}/node_modules`, `${worktreePath}/node_modules`]).exited;
-  // copy .env.keys so dotenvx works
+  await Bun.spawn(["cp", `${PROJECT_ROOT}/.env`, `${worktreePath}/.env`]).exited;
   await Bun.spawn(["cp", `${PROJECT_ROOT}/.env.keys`, `${worktreePath}/.env.keys`]).exited;
-  // copy .keys for JWT
   await Bun.spawn(["cp", "-r", `${PROJECT_ROOT}/.keys`, `${worktreePath}/.keys`]).exited;
 
   console.log(`[worktree] created ${name} at ${worktreePath} (branch: ${branch})`);
@@ -66,7 +65,8 @@ export async function createWorktree(name: string): Promise<{ path: string; bran
 // commit all changes in a worktree
 export async function commitWorktree(name: string, message: string): Promise<string> {
   const worktreePath = `${SESSIONS_DIR}/${name}`;
-  await gitIn(worktreePath, "add", "-A");
+  // exclude files that should never be merged
+  await gitIn(worktreePath, "add", "-A", "--", ".", ":!.env", ":!.env.keys", ":!.keys");
   const result = await gitIn(worktreePath, "commit", "-m", message, "--allow-empty");
   console.log(`[worktree] committed ${name}: ${result.stdout}`);
   return result.stdout;
@@ -78,7 +78,7 @@ export async function checkMergeable(name: string): Promise<{ mergeable: boolean
 
   // auto-commit any pending changes in the worktree first
   const worktreePath = `${SESSIONS_DIR}/${name}`;
-  await gitIn(worktreePath, "add", "-A");
+  await gitIn(worktreePath, "add", "-A", "--", ".", ":!.env", ":!.env.keys", ":!.keys");
   await gitIn(worktreePath, "commit", "-m", `auto-commit before merge check`, "--allow-empty");
 
   // try a dry-run merge
@@ -105,8 +105,8 @@ export async function mergeToLive(name: string, user: string): Promise<{ success
   const branch = `session/${name}`;
   const worktreePath = `${SESSIONS_DIR}/${name}`;
 
-  // commit any pending changes in the worktree
-  await gitIn(worktreePath, "add", "-A");
+  // commit any pending changes in the worktree (exclude env/secrets)
+  await gitIn(worktreePath, "add", "-A", "--", ".", ":!.env", ":!.env.keys", ":!.keys");
   await gitIn(worktreePath, "commit", "-m", `session ${name}: final changes`, "--allow-empty");
 
   // merge into main

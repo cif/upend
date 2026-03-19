@@ -1,43 +1,11 @@
 :4000 {
-	# Neon Data API proxy — /api/data/* → PostgREST
-	handle_path /api/data/* {
-		rewrite * /neondb/rest/v1{uri}
-		reverse_proxy https://ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech {
-			header_up Host ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech
-		}
-	}
-
-	# Live apps
-	handle_path /apps/* {
-		root * apps
-		try_files {path} {path}/index.html
-		file_server
-	}
-
-	# Drizzle Studio
-	handle_path /studio/* {
-		reverse_proxy localhost:4983
-	}
-
-	# API service (auth, webhooks, business logic)
-	handle_path /api/* {
-		reverse_proxy localhost:3001
-	}
-
-	# Claude editing service + chat UI
+	# Claude service (sessions + WebSocket)
 	handle_path /claude/* {
 		reverse_proxy localhost:3002
 	}
 
-	# JWKS
-	handle /.well-known/* {
-		reverse_proxy localhost:3001
-	}
-
-	# Default → dashboard shell
+	# Everything else → gateway
 	handle {
-		root * services/dashboard/public
-		try_files {path} /index.html
-		file_server
+		reverse_proxy localhost:3001
 	}
 }

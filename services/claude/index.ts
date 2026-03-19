@@ -1,38 +1,40 @@
 import { Hono } from "hono";
 import { logger } from "hono/logger";
-import { serveStatic } from "hono/bun";
 import { cors } from "hono/cors";
 import { sql } from "../../lib/db";
 import { verifyToken } from "../../lib/auth";
 import { requireAuth } from "../../lib/middleware";
 import { snapshot, listSnapshots, restoreSnapshot } from "./snapshots";
 import { generateSessionName, createWorktree, commitWorktree, checkMergeable, mergeToLive, removeWorktree, getWorktreePath } from "./worktree";
-import { existsSync, mkdirSync, readdirSync, writeFileSync, statSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, statSync } from "fs";
 import { join } from "path";
 
 const app = new Hono();
 app.use("*", logger());
 app.use("*", cors());
 
-// serve the chat UI (public — auth happens client-side)
-app.use("/ui/*", serveStatic({ root: "./services/claude/public", rewriteRequestPath: (p) => p.replace("/ui", "") }));
-app.get("/", (c) => c.redirect("/ui/"));
-
-const PROJECT_ROOT = process.env.UPEND_ROOT || process.cwd();
+const PROJECT_ROOT = process.env.UPEND_PROJECT || process.cwd();
 const APPS_DIR = join(PROJECT_ROOT, "apps");
 
 // preview endpoint — public (served in iframes, no auth header)
 app.get("/preview/:session/*", async (c) => {
   const sessionName = c.req.param("session");
   const filePath = c.req.path.replace(`/preview/${sessionName}/`, "");
-  const fullPath = join(getWorktreePath(sessionName), filePath);
 
-  for (const candidate of [fullPath, join(fullPath, "index.html")]) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) {
-      const file = Bun.file(candidate);
-      return new Response(file, {
-        headers: { "Content-Type": file.type || "text/html" },
-      });
+  // try worktree first, then fall back to main project
+  const searchPaths = [
+    join(getWorktreePath(sessionName), filePath),
+    join(APPS_DIR, filePath.replace(/^apps\//, "")),
+  ];
+
+  for (const basePath of searchPaths) {
+    for (const candidate of [basePath, join(basePath, "index.html")]) {
+      if (existsSync(candidate) && statSync(candidate).isFile()) {
+        const file = Bun.file(candidate);
+        return new Response(file, {
+          headers: { "Content-Type": file.type || "text/html" },
+        });
+      }
     }
   }
   return c.json({ error: "not found" }, 404);
@@ -40,6 +42,25 @@ app.get("/preview/:session/*", async (c) => {
 
 // everything else requires auth
 app.use("*", requireAuth);
+
+// ---------- file uploads ----------
+
+app.post("/upload", async (c) => {
+  const { name, type, data } = await c.req.json();
+  if (!name || !data) return c.json({ error: "name and data required" }, 400);
+
+  // save to uploads/ in the project root (or worktree if in session)
+  const uploadsDir = join(PROJECT_ROOT, "uploads");
+  mkdirSync(uploadsDir, { recursive: true });
+
+  const safeName = name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const filePath = join(uploadsDir, `${Date.now()}-${safeName}`);
+  const buffer = Buffer.from(data, "base64");
+  writeFileSync(filePath, buffer);
+
+  console.log(`[upload] ${safeName} (${buffer.length} bytes) → ${filePath}`);
+  return c.json({ path: filePath, name: safeName, size: buffer.length });
+});
 
 // ---------- websocket clients ----------
 
@@ -64,8 +85,8 @@ app.post("/sessions", async (c) => {
 
   const activeSessions = await sql`
     SELECT es.*,
-      (SELECT sm.content FROM session_messages sm WHERE sm.session_id = es.id ORDER BY sm.created_at DESC LIMIT 1) as last_message
-    FROM editing_sessions es WHERE es.status = 'active' ORDER BY es.created_at DESC
+      (SELECT sm.content FROM upend.session_messages sm WHERE sm.session_id = es.id ORDER BY sm.created_at DESC LIMIT 1) as last_message
+    FROM upend.editing_sessions es WHERE es.status = 'active' ORDER BY es.created_at DESC
   `;
 
   if (activeSessions.length > 0 && !force) {
@@ -92,13 +113,13 @@ app.post("/sessions", async (c) => {
   const claudeSessionId = crypto.randomUUID();
 
   const [session] = await sql`
-    INSERT INTO editing_sessions (prompt, status, claude_session_id, snapshot_name, title, context)
+    INSERT INTO upend.editing_sessions (prompt, status, claude_session_id, snapshot_name, title, context)
     VALUES (${prompt}, 'active', ${claudeSessionId}, ${sessionName}, ${title || null}, ${JSON.stringify({ root: worktree.path, worktree: sessionName, branch: worktree.branch })})
     RETURNING *
   `;
 
   const [msg] = await sql`
-    INSERT INTO session_messages (session_id, role, content, status)
+    INSERT INTO upend.session_messages (session_id, role, content, status)
     VALUES (${session.id}, 'user', ${prompt}, 'pending')
     RETURNING *
   `;
@@ -113,17 +134,17 @@ app.post("/sessions/:id/messages", async (c) => {
   const { prompt } = await c.req.json();
   if (!prompt) return c.json({ error: "prompt is required" }, 400);
 
-  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${sessionId}`;
+  const [session] = await sql`SELECT * FROM upend.editing_sessions WHERE id = ${sessionId}`;
   if (!session) return c.json({ error: "session not found" }, 404);
   if (session.status !== "active") return c.json({ error: `session is ${session.status}` }, 400);
 
   const [running] = await sql`
-    SELECT id FROM session_messages WHERE session_id = ${sessionId} AND status = 'running'
+    SELECT id FROM upend.session_messages WHERE session_id = ${sessionId} AND status = 'running'
   `;
   if (running) return c.json({ error: "a message is already running" }, 409);
 
   const [msg] = await sql`
-    INSERT INTO session_messages (session_id, role, content, status)
+    INSERT INTO upend.session_messages (session_id, role, content, status)
     VALUES (${sessionId}, 'user', ${prompt}, 'pending')
     RETURNING *
   `;
@@ -138,20 +159,20 @@ app.post("/sessions/:id/messages", async (c) => {
 
 app.get("/sessions/:id", async (c) => {
   const id = c.req.param("id");
-  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${id}`;
+  const [session] = await sql`SELECT * FROM upend.editing_sessions WHERE id = ${id}`;
   if (!session) return c.json({ error: "not found" }, 404);
-  const messages = await sql`SELECT * FROM session_messages WHERE session_id = ${id} ORDER BY created_at`;
+  const messages = await sql`SELECT * FROM upend.session_messages WHERE session_id = ${id} ORDER BY created_at`;
   return c.json({ ...session, messages });
 });
 
 app.get("/sessions", async (c) => {
-  const rows = await sql`SELECT * FROM editing_sessions ORDER BY created_at DESC LIMIT 50`;
+  const rows = await sql`SELECT * FROM upend.editing_sessions ORDER BY created_at DESC LIMIT 50`;
   return c.json(rows);
 });
 
 app.post("/sessions/:id/end", async (c) => {
   const id = c.req.param("id");
-  await sql`UPDATE editing_sessions SET status = 'ended' WHERE id = ${id}`;
+  await sql`UPDATE upend.editing_sessions SET status = 'ended' WHERE id = ${id}`;
   activeProcesses.delete(Number(id));
   return c.json({ ended: true });
 });
@@ -162,7 +183,7 @@ app.post("/sessions/:id/kill", async (c) => {
   if (!proc) return c.json({ error: "nothing running" }, 404);
   proc.kill();
   activeProcesses.delete(id);
-  await sql`UPDATE session_messages SET status = 'killed' WHERE session_id = ${id} AND status = 'running'`;
+  await sql`UPDATE upend.session_messages SET status = 'killed' WHERE session_id = ${id} AND status = 'running'`;
   broadcast(id, { type: "status", status: "killed" });
   return c.json({ killed: true });
 });
@@ -172,7 +193,7 @@ app.post("/sessions/:id/kill", async (c) => {
 // check if a session can merge cleanly
 app.get("/sessions/:id/mergeable", async (c) => {
   const id = c.req.param("id");
-  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${id}`;
+  const [session] = await sql`SELECT * FROM upend.editing_sessions WHERE id = ${id}`;
   if (!session) return c.json({ error: "not found" }, 404);
 
   const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
@@ -192,7 +213,7 @@ app.get("/sessions/:id/mergeable", async (c) => {
 app.post("/sessions/:id/commit", async (c) => {
   const id = c.req.param("id");
   const user = c.get("user") as { sub: string; email: string };
-  const [session] = await sql`SELECT * FROM editing_sessions WHERE id = ${id}`;
+  const [session] = await sql`SELECT * FROM upend.editing_sessions WHERE id = ${id}`;
   if (!session) return c.json({ error: "not found" }, 404);
   if (session.status !== "active") return c.json({ error: `session is ${session.status}` }, 400);
 
@@ -211,7 +232,7 @@ app.post("/sessions/:id/commit", async (c) => {
     }
 
     // mark session as committed
-    await sql`UPDATE editing_sessions SET status = 'committed' WHERE id = ${id}`;
+    await sql`UPDATE upend.editing_sessions SET status = 'committed' WHERE id = ${id}`;
 
     // restart live services so changes take effect
     restartServices();
@@ -222,67 +243,6 @@ app.post("/sessions/:id/commit", async (c) => {
     console.error(`[session] commit failed:`, err);
     return c.json({ error: err.message }, 500);
   }
-});
-
-// ---------- apps ----------
-
-// helper: resolve apps dir for live or session worktree
-function resolveAppsDir(c: any): string {
-  const sessionName = c.req.query("session");
-  if (sessionName) {
-    const worktreeApps = join(getWorktreePath(sessionName), "apps");
-    if (existsSync(worktreeApps)) return worktreeApps;
-  }
-  return APPS_DIR;
-}
-
-app.get("/apps", async (c) => {
-  const appsDir = resolveAppsDir(c);
-  mkdirSync(appsDir, { recursive: true });
-  const apps = readdirSync(appsDir)
-    .filter((f) => statSync(join(appsDir, f)).isDirectory())
-    .map((name) => ({ name, url: `/apps/${name}/`, created: statSync(join(appsDir, name)).birthtime }));
-  return c.json(apps);
-});
-
-app.post("/apps", async (c) => {
-  const { name, files } = await c.req.json();
-  if (!name) return c.json({ error: "name is required" }, 400);
-  if (!files || typeof files !== "object") return c.json({ error: "provide files: { 'index.html': '...' }" }, 400);
-
-  const appDir = join(APPS_DIR, name);
-  mkdirSync(appDir, { recursive: true });
-  for (const [filename, content] of Object.entries(files)) {
-    const filePath = join(appDir, filename);
-    mkdirSync(join(filePath, ".."), { recursive: true });
-    writeFileSync(filePath, content as string);
-  }
-  return c.json({ app: name, url: `/apps/${name}/`, files: Object.keys(files), live: true }, 201);
-});
-
-// serve app files from a session worktree (preview before commit)
-app.post("/apps/generate", async (c) => {
-  const { name, prompt } = await c.req.json();
-  if (!name || !prompt) return c.json({ error: "name and prompt required" }, 400);
-
-  const appDir = join(APPS_DIR, name);
-  mkdirSync(appDir, { recursive: true });
-
-  const metaPrompt = `Create a self-contained web app in the directory ${appDir}.
-The app will be served as static files at /apps/${name}/ — it needs at minimum an index.html.
-It can talk to the API at /api/ (same origin). Auth tokens are in localStorage as 'upend_token'.
-Use Bearer token in Authorization headers. API endpoints:
-- POST /api/auth/signup, /api/auth/login — { email, password } → { user, token }
-- GET/POST/PATCH/DELETE /api/data/:table(/:id) — CRUD (requires auth)
-Keep it simple. No build step. Vanilla JS unless the prompt asks otherwise.
-User's request: ${prompt}`;
-
-  Bun.spawn(
-    ["claude", "-p", metaPrompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
-    { cwd: PROJECT_ROOT, env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "upend" }, stdout: "inherit", stderr: "inherit" }
-  );
-
-  return c.json({ app: name, url: `/apps/${name}/`, status: "generating" }, 202);
 });
 
 // ---------- snapshots / rollback ----------
@@ -315,7 +275,7 @@ async function runMessage(
   cwd: string = PROJECT_ROOT
 ) {
   try {
-    await sql`UPDATE session_messages SET status = 'running' WHERE id = ${messageId}`;
+    await sql`UPDATE upend.session_messages SET status = 'running' WHERE id = ${messageId}`;
     broadcast(sessionId, { type: "status", status: "running", messageId });
     console.log(`[claude:${sessionId}] message ${messageId} → running (user: ${user.email})`);
 
@@ -388,7 +348,7 @@ async function runMessage(
               if (block.type === "text") {
                 resultText += block.text;
                 // update DB with partial result as it streams
-                await sql`UPDATE session_messages SET result = ${resultText} WHERE id = ${messageId}`;
+                await sql`UPDATE upend.session_messages SET result = ${resultText} WHERE id = ${messageId}`;
                 broadcast(sessionId, { type: "text", text: block.text, messageId });
               } else if (block.type === "tool_use") {
                 broadcast(sessionId, { type: "tool_use", name: block.name, input: block.input, messageId });
@@ -424,12 +384,12 @@ async function runMessage(
       const errMsg = `claude error: ${errorDetail}`;
       console.error(`[claude:${sessionId}] FULL OUTPUT:\n${fullOutput}`);
       console.error(`[claude:${sessionId}] ERROR: ${errMsg}`);
-      await sql`UPDATE session_messages SET status = 'error', result = ${errMsg} WHERE id = ${messageId}`;
+      await sql`UPDATE upend.session_messages SET status = 'error', result = ${errMsg} WHERE id = ${messageId}`;
       broadcast(sessionId, { type: "status", status: "error", error: errMsg, messageId });
       return;
     }
 
-    await sql`UPDATE session_messages SET status = 'complete', result = ${resultText} WHERE id = ${messageId}`;
+    await sql`UPDATE upend.session_messages SET status = 'complete', result = ${resultText} WHERE id = ${messageId}`;
     broadcast(sessionId, { type: "status", status: "complete", messageId });
     console.log(`[claude:${sessionId}] complete: "${resultText.slice(0, 100)}"`);
 
@@ -438,21 +398,25 @@ async function runMessage(
   } catch (err: any) {
     console.error(`[claude:${sessionId}] EXCEPTION:`, err);
     activeProcesses.delete(sessionId);
-    await sql`UPDATE session_messages SET status = 'error', result = ${err.message} WHERE id = ${messageId}`;
+    await sql`UPDATE upend.session_messages SET status = 'error', result = ${err.message} WHERE id = ${messageId}`;
     broadcast(sessionId, { type: "status", status: "error", error: err.message, messageId });
   }
 }
 
 function restartServices() {
   console.log("[restart] restarting non-claude services...");
-  // kill and restart API service (claude service stays running since we're in it)
+  const cliRoot = new URL("../../../", import.meta.url).pathname;
   Bun.spawn(["bash", "-c", `
-    pkill -f "bun services/api" 2>/dev/null || true
+    pkill -f "gateway/index.ts" 2>/dev/null || true
     sleep 1
     cd ${PROJECT_ROOT}
-    nohup dotenvx run -- bun services/api/index.ts > /tmp/upend-api.log 2>&1 &
+    nohup bun --watch ${cliRoot}/src/services/gateway/index.ts > /tmp/upend-api.log 2>&1 &
     echo "api restarted"
-  `], { stdout: "inherit", stderr: "inherit" });
+  `], {
+    env: { ...process.env, API_PORT: "3001", UPEND_PROJECT: PROJECT_ROOT },
+    stdout: "inherit",
+    stderr: "inherit",
+  });
 }
 
 // ---------- bun server with websocket support ----------

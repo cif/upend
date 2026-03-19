@@ -13,7 +13,9 @@ export const requireAuth = createMiddleware<{
 }>(async (c, next) => {
   const header = c.req.header("Authorization");
   const queryToken = c.req.query("token");
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : queryToken;
+  const cookieHeader = c.req.header("Cookie") || "";
+  const cookieToken = cookieHeader.match(/upend_token=([^;]+)/)?.[1];
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : queryToken || cookieToken;
   const method = c.req.method;
   const path = c.req.path;
 

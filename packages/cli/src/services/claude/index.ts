@@ -6,7 +6,7 @@ import { verifyToken } from "../../lib/auth";
 import { requireAuth } from "../../lib/middleware";
 import { snapshot, listSnapshots, restoreSnapshot } from "./snapshots";
 import { generateSessionName, createWorktree, commitWorktree, checkMergeable, mergeToLive, removeWorktree, getWorktreePath } from "./worktree";
-import { existsSync, mkdirSync, readdirSync, writeFileSync, statSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, statSync } from "fs";
 import { join } from "path";
 
 const app = new Hono();
@@ -20,14 +20,21 @@ const APPS_DIR = join(PROJECT_ROOT, "apps");
 app.get("/preview/:session/*", async (c) => {
   const sessionName = c.req.param("session");
   const filePath = c.req.path.replace(`/preview/${sessionName}/`, "");
-  const fullPath = join(getWorktreePath(sessionName), filePath);
 
-  for (const candidate of [fullPath, join(fullPath, "index.html")]) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) {
-      const file = Bun.file(candidate);
-      return new Response(file, {
-        headers: { "Content-Type": file.type || "text/html" },
-      });
+  // try worktree first, then fall back to main project
+  const searchPaths = [
+    join(getWorktreePath(sessionName), filePath),
+    join(APPS_DIR, filePath.replace(/^apps\//, "")),
+  ];
+
+  for (const basePath of searchPaths) {
+    for (const candidate of [basePath, join(basePath, "index.html")]) {
+      if (existsSync(candidate) && statSync(candidate).isFile()) {
+        const file = Bun.file(candidate);
+        return new Response(file, {
+          headers: { "Content-Type": file.type || "text/html" },
+        });
+      }
     }
   }
   return c.json({ error: "not found" }, 404);
@@ -35,6 +42,25 @@ app.get("/preview/:session/*", async (c) => {
 
 // everything else requires auth
 app.use("*", requireAuth);
+
+// ---------- file uploads ----------
+
+app.post("/upload", async (c) => {
+  const { name, type, data } = await c.req.json();
+  if (!name || !data) return c.json({ error: "name and data required" }, 400);
+
+  // save to uploads/ in the project root (or worktree if in session)
+  const uploadsDir = join(PROJECT_ROOT, "uploads");
+  mkdirSync(uploadsDir, { recursive: true });
+
+  const safeName = name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const filePath = join(uploadsDir, `${Date.now()}-${safeName}`);
+  const buffer = Buffer.from(data, "base64");
+  writeFileSync(filePath, buffer);
+
+  console.log(`[upload] ${safeName} (${buffer.length} bytes) → ${filePath}`);
+  return c.json({ path: filePath, name: safeName, size: buffer.length });
+});
 
 // ---------- websocket clients ----------
 
@@ -217,67 +243,6 @@ app.post("/sessions/:id/commit", async (c) => {
     console.error(`[session] commit failed:`, err);
     return c.json({ error: err.message }, 500);
   }
-});
-
-// ---------- apps ----------
-
-// helper: resolve apps dir for live or session worktree
-function resolveAppsDir(c: any): string {
-  const sessionName = c.req.query("session");
-  if (sessionName) {
-    const worktreeApps = join(getWorktreePath(sessionName), "apps");
-    if (existsSync(worktreeApps)) return worktreeApps;
-  }
-  return APPS_DIR;
-}
-
-app.get("/apps", async (c) => {
-  const appsDir = resolveAppsDir(c);
-  mkdirSync(appsDir, { recursive: true });
-  const apps = readdirSync(appsDir)
-    .filter((f) => statSync(join(appsDir, f)).isDirectory())
-    .map((name) => ({ name, url: `/apps/${name}/`, created: statSync(join(appsDir, name)).birthtime }));
-  return c.json(apps);
-});
-
-app.post("/apps", async (c) => {
-  const { name, files } = await c.req.json();
-  if (!name) return c.json({ error: "name is required" }, 400);
-  if (!files || typeof files !== "object") return c.json({ error: "provide files: { 'index.html': '...' }" }, 400);
-
-  const appDir = join(APPS_DIR, name);
-  mkdirSync(appDir, { recursive: true });
-  for (const [filename, content] of Object.entries(files)) {
-    const filePath = join(appDir, filename);
-    mkdirSync(join(filePath, ".."), { recursive: true });
-    writeFileSync(filePath, content as string);
-  }
-  return c.json({ app: name, url: `/apps/${name}/`, files: Object.keys(files), live: true }, 201);
-});
-
-// serve app files from a session worktree (preview before commit)
-app.post("/apps/generate", async (c) => {
-  const { name, prompt } = await c.req.json();
-  if (!name || !prompt) return c.json({ error: "name and prompt required" }, 400);
-
-  const appDir = join(APPS_DIR, name);
-  mkdirSync(appDir, { recursive: true });
-
-  const metaPrompt = `Create a self-contained web app in the directory ${appDir}.
-The app will be served as static files at /apps/${name}/ — it needs at minimum an index.html.
-It can talk to the API at /api/ (same origin). Auth tokens are in localStorage as 'upend_token'.
-Use Bearer token in Authorization headers. API endpoints:
-- POST /api/auth/signup, /api/auth/login — { email, password } → { user, token }
-- GET/POST/PATCH/DELETE /api/data/:table(/:id) — CRUD (requires auth)
-Keep it simple. No build step. Vanilla JS unless the prompt asks otherwise.
-User's request: ${prompt}`;
-
-  Bun.spawn(
-    ["claude", "-p", metaPrompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
-    { cwd: PROJECT_ROOT, env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "upend" }, stdout: "inherit", stderr: "inherit" }
-  );
-
-  return c.json({ app: name, url: `/apps/${name}/`, status: "generating" }, 202);
 });
 
 // ---------- snapshots / rollback ----------

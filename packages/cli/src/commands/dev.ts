@@ -65,11 +65,14 @@ export default async function dev(args: string[]) {
 
 function generateCaddyfile(projectDir: string, cliRoot: string, apiPort: string, claudePort: string, proxyPort: string): string {
   return `:${proxyPort} {
-  # Live apps
-  handle_path /apps/* {
-    root * ${projectDir}/apps
-    try_files {path} {path}/index.html
-    file_server
+  # Apps (served through gateway for access control)
+  handle /apps/* {
+    reverse_proxy localhost:${apiPort}
+  }
+
+  # User services (dispatched through gateway)
+  handle /services/* {
+    reverse_proxy localhost:${apiPort}
   }
 
   # API service (auth, JWKS, tables)

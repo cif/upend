@@ -5,8 +5,25 @@ import { cors } from "hono/cors";
 import { authRoutes } from "./auth-routes";
 import { sql } from "../../lib/db";
 import { requireAuth } from "../../lib/middleware";
+import { existsSync, statSync, readdirSync, readFileSync } from "fs";
+import { join } from "path";
 
 const app = new Hono();
+
+const PROJECT_ROOT = process.env.UPEND_PROJECT || process.cwd();
+const SESSIONS_DIR = join(PROJECT_ROOT, "sessions");
+
+// ---------- session-aware path resolver ----------
+// resolves to worktree if session header is set, otherwise main
+
+function resolveRoot(c: any): string {
+  const session = c.req.header("X-Upend-Session") || c.req.query("_session");
+  if (session && session !== "main") {
+    const sessionPath = join(SESSIONS_DIR, session);
+    if (existsSync(sessionPath)) return sessionPath;
+  }
+  return PROJECT_ROOT;
+}
 
 // audit log — append-only, used across all services
 export async function audit(action: string, opts: { actorId?: string; actorEmail?: string; targetType?: string; targetId?: string; detail?: any; ip?: string } = {}) {
@@ -22,10 +39,57 @@ app.use("*", logger());
 app.use("*", timing());
 app.use("*", cors());
 
-app.get("/", (c) => c.json({ service: "api", status: "up", ts: Date.now() }));
+app.get("/api/health", (c) => c.json({ service: "api", status: "up", ts: Date.now() }));
 
 // auth routes — signup, login, SSO, JWKS
 app.route("/", authRoutes);
+
+// ---------- apps (session-aware, served through gateway) ----------
+
+// list apps
+app.get("/apps", requireAuth, async (c) => {
+  const root = resolveRoot(c);
+  const seen = new Set<string>();
+  const apps: any[] = [];
+
+  for (const base of [root, PROJECT_ROOT]) {
+    const appsDir = join(base, "apps");
+    try {
+      const entries = readdirSync(appsDir);
+      for (const name of entries) {
+        if (seen.has(name)) continue;
+        const dir = join(appsDir, name);
+        if (existsSync(join(dir, "index.html")) || (statSync(dir).isDirectory() && existsSync(dir))) {
+          seen.add(name);
+          apps.push({ name, url: `/apps/${name}/`, source: base === root && root !== PROJECT_ROOT ? "session" : "main" });
+        }
+      }
+    } catch {}
+  }
+
+  return c.json(apps);
+});
+
+// serve app files
+app.get("/apps/*", requireAuth, async (c) => {
+  const root = resolveRoot(c);
+  const path = c.req.path.replace("/apps/", "");
+  const appsDir = join(root, "apps");
+
+  // try session path first, fall back to main
+  for (const base of [appsDir, join(PROJECT_ROOT, "apps")]) {
+    const filePath = join(base, path);
+    for (const candidate of [filePath, join(filePath, "index.html")]) {
+      if (existsSync(candidate) && statSync(candidate).isFile()) {
+        const file = Bun.file(candidate);
+        return new Response(file, {
+          headers: { "Content-Type": file.type || "text/html", "Cache-Control": "no-cache, no-store, must-revalidate" },
+        });
+      }
+    }
+  }
+  return c.json({ error: "not found" }, 404);
+});
 
 // schema introspection — used by the dashboard
 app.get("/tables", requireAuth, async (c) => {
@@ -154,6 +218,63 @@ app.delete("/data/:table", requireAuth, async (c) => {
   return c.json(rows);
 });
 
+// ---------- service dispatcher (session-aware lambda) ----------
+// dynamically imports and runs user services from the right worktree
+
+const serviceCache = new Map<string, { mod: any; mtime: number }>();
+
+app.all("/services/:name/*", requireAuth, async (c) => {
+  const root = resolveRoot(c);
+  const serviceName = c.req.param("name");
+  const entryPath = join(root, "services", serviceName, "index.ts");
+
+  if (!existsSync(entryPath)) {
+    // fall back to main if not in worktree
+    const mainPath = join(PROJECT_ROOT, "services", serviceName, "index.ts");
+    if (!existsSync(mainPath)) {
+      return c.json({ error: `service '${serviceName}' not found` }, 404);
+    }
+    return dispatchService(c, mainPath);
+  }
+
+  return dispatchService(c, entryPath);
+});
+
+async function dispatchService(c: any, entryPath: string) {
+  try {
+    const stat = statSync(entryPath);
+    const cached = serviceCache.get(entryPath);
+
+    // bust cache if file changed
+    if (cached && cached.mtime === stat.mtimeMs) {
+      return cached.mod.default.fetch(c.req.raw);
+    }
+
+    // dynamic import with cache bust via query param
+    const mod = await import(`${entryPath}?t=${stat.mtimeMs}`);
+    serviceCache.set(entryPath, { mod, mtime: stat.mtimeMs });
+
+    if (mod.default?.fetch) {
+      // Hono app — delegate the request
+      // rewrite the path to strip /services/:name prefix
+      const serviceName = c.req.path.split("/")[2];
+      const subPath = c.req.path.replace(`/services/${serviceName}`, "") || "/";
+      const url = new URL(c.req.url);
+      url.pathname = subPath;
+      const newReq = new Request(url.toString(), c.req.raw);
+      return mod.default.fetch(newReq);
+    } else if (typeof mod.default === "function") {
+      // simple handler function
+      return mod.default(c);
+    } else {
+      return c.json({ error: `service has no default export` }, 500);
+    }
+  } catch (err: any) {
+    console.error(`[service:dispatch] ${entryPath}: ${err.message}`);
+    return c.json({ error: err.message }, 500);
+  }
+}
+
 // RLS policies — used by dashboard to display access rules
 app.get("/policies", requireAuth, async (c) => {
   const policies = await sql`
@@ -191,48 +312,55 @@ app.get("/audit", requireAuth, async (c) => {
   return c.json(rows);
 });
 
-// ---------- workflows ----------
+// ---------- tasks (session-aware) ----------
 
-import { readdirSync, readFileSync } from "fs";
-import { join } from "path";
+app.get("/tasks", requireAuth, async (c) => {
+  const root = resolveRoot(c);
+  const seen = new Set<string>();
+  const tasks: any[] = [];
 
-const WORKFLOWS_DIR = join(process.env.UPEND_PROJECT || process.cwd(), "workflows");
+  // collect from session worktree first (overrides main), then main
+  for (const base of [root, PROJECT_ROOT]) {
+    const tasksDir = join(base, "tasks");
+    let files: string[];
+    try {
+      files = readdirSync(tasksDir).filter(f => f.endsWith(".ts") || f.endsWith(".js"));
+    } catch { continue; }
 
-app.get("/workflows", requireAuth, async (c) => {
-  let files: string[];
-  try {
-    files = readdirSync(WORKFLOWS_DIR).filter(f => f.endsWith(".ts") || f.endsWith(".js"));
-  } catch {
-    return c.json([]);
+    for (const file of files) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      const content = readFileSync(join(tasksDir, file), "utf-8");
+      const cronMatch = content.match(/\/\/\s*@cron\s+(.+)/);
+      const descMatch = content.match(/\/\/\s*@description\s+(.+)/);
+      tasks.push({
+        name: file.replace(/\.(ts|js)$/, ""),
+        file,
+        cron: cronMatch ? cronMatch[1].trim() : null,
+        description: descMatch ? descMatch[1].trim() : "",
+        source: base === root && root !== PROJECT_ROOT ? "session" : "main",
+      });
+    }
   }
 
-  const workflows = files.map(file => {
-    const content = readFileSync(join(WORKFLOWS_DIR, file), "utf-8");
-    const cronMatch = content.match(/\/\/\s*@cron\s+(.+)/);
-    const descMatch = content.match(/\/\/\s*@description\s+(.+)/);
-    return {
-      name: file.replace(/\.(ts|js)$/, ""),
-      file,
-      cron: cronMatch ? cronMatch[1].trim() : null,
-      description: descMatch ? descMatch[1].trim() : "",
-    };
-  });
-
-  return c.json(workflows);
+  return c.json(tasks);
 });
 
-app.post("/workflows/:name/run", requireAuth, async (c) => {
+app.post("/tasks/:name/run", requireAuth, async (c) => {
   const user = getUser(c);
   if (user.role !== "admin") return c.json({ error: "admin only" }, 403);
 
+  const root = resolveRoot(c);
   const name = c.req.param("name");
   const file = `${name}.ts`;
-  const path = join(WORKFLOWS_DIR, file);
+  const filePath = join(root, "tasks", file);
 
-  console.log(`[workflow] ${name} triggered by ${user.email}`);
-  const proc = Bun.spawn(["bun", path], {
-    cwd: process.env.UPEND_PROJECT || process.cwd(),
-    env: process.env,
+  if (!existsSync(filePath)) return c.json({ error: `task '${name}' not found` }, 404);
+
+  console.log(`[task] ${name} triggered by ${user.email} (root: ${root})`);
+  const proc = Bun.spawn(["bun", filePath], {
+    cwd: root,
+    env: { ...process.env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -241,9 +369,38 @@ app.post("/workflows/:name/run", requireAuth, async (c) => {
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
 
-  console.log(`[workflow] ${name} exit=${exitCode}`);
-  await audit("workflow.run", { actorId: user.sub, actorEmail: user.email, targetType: "workflow", targetId: name, detail: { exitCode, stdout: stdout.slice(0, 500) } });
+  console.log(`[task] ${name} exit=${exitCode}`);
+  await audit("task.run", { actorId: user.sub, actorEmail: user.email, targetType: "task", targetId: name, detail: { exitCode, stdout: stdout.slice(0, 500) } });
   return c.json({ name, exitCode, stdout, stderr });
+});
+
+// ---------- dashboard (catch-all, no auth) ----------
+
+const DASHBOARD_DIR = process.env.UPEND_DASHBOARD_DIR
+  || join(new URL("../dashboard/public", import.meta.url).pathname);
+
+app.get("/*", async (c) => {
+  const path = c.req.path;
+  const filePath = join(DASHBOARD_DIR, path);
+
+  for (const candidate of [filePath, join(filePath, "index.html")]) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) {
+      const file = Bun.file(candidate);
+      return new Response(file, {
+        headers: { "Content-Type": file.type || "text/html" },
+      });
+    }
+  }
+
+  // SPA fallback for client-side routing (/session/xxx etc)
+  const indexPath = join(DASHBOARD_DIR, "index.html");
+  if (existsSync(indexPath)) {
+    return new Response(Bun.file(indexPath), {
+      headers: { "Content-Type": "text/html" },
+    });
+  }
+
+  return c.json({ error: "not found" }, 404);
 });
 
 const port = Number(process.env.API_PORT) || 3001;

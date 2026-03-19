@@ -58,21 +58,21 @@ export default async function deploy(args: string[]) {
     curl -s -o /dev/null -w "API: %{http_code}\\n" http://localhost:3001/
     curl -s -o /dev/null -w "Caddy: %{http_code}\\n" http://localhost:80/
 
-    # install workflow cron schedules
-    if [ -d ${appDir}/workflows ]; then
+    # install task cron schedules
+    if [ -d ${appDir}/tasks ]; then
       # strip old upend entries
-      crontab -l 2>/dev/null | grep -v "# upend-workflow:" > /tmp/upend-crontab-clean || true
+      crontab -l 2>/dev/null | grep -v "# upend-task:" > /tmp/upend-crontab-clean || true
       # add new entries from @cron comments
-      for f in ${appDir}/workflows/*.ts; do
+      for f in ${appDir}/tasks/*.ts; do
         [ -f "$f" ] || continue
         name=$(basename "$f" .ts)
         cron=$(grep -oP "//\\s*@cron\\s+\\K.+" "$f" || true)
         if [ -n "$cron" ]; then
-          echo "$cron cd ${appDir} && bun $f >> /tmp/upend-workflow-$name.log 2>&1 # upend-workflow: $name" >> /tmp/upend-crontab-clean
+          echo "$cron cd ${appDir} && bun $f >> /tmp/upend-task-$name.log 2>&1 # upend-task: $name" >> /tmp/upend-crontab-clean
         fi
       done
       crontab /tmp/upend-crontab-clean
-      echo "workflows installed: $(crontab -l 2>/dev/null | grep -c upend-workflow) cron entries"
+      echo "tasks installed: $(crontab -l 2>/dev/null | grep -c upend-task) cron entries"
     fi
   '`);
   log.success("deployed");

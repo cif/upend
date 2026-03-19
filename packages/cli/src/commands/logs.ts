@@ -10,7 +10,7 @@ export default async function logs(args: string[]) {
     process.exit(1);
   }
 
-  const service = args[0]; // api, claude, caddy, workflow-<name>, or blank for all
+  const service = args[0]; // api, claude, caddy, task-<name>, or blank for all
   let logFiles: string;
 
   if (service === "api") {
@@ -19,8 +19,8 @@ export default async function logs(args: string[]) {
     logFiles = "/tmp/upend-claude.log";
   } else if (service === "caddy") {
     logFiles = "/tmp/upend-caddy.log";
-  } else if (service?.startsWith("workflow-")) {
-    logFiles = `/tmp/upend-workflow-${service.replace("workflow-", "")}.log`;
+  } else if (service?.startsWith("task-")) {
+    logFiles = `/tmp/upend-task-${service.replace("task-", "")}.log`;
   } else {
     logFiles = "/tmp/upend-api.log /tmp/upend-claude.log /tmp/upend-caddy.log";
   }

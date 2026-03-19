@@ -35,8 +35,8 @@ export default async function status(args: string[]) {
     free -h 2>/dev/null | awk "/Mem:/{print \"memory: \" \\$3 \" used / \" \\$2}" || echo "memory: n/a"
 
     echo ""
-    echo "=== workflows (crontab) ==="
-    crontab -l 2>/dev/null | grep "upend-workflow" || echo "none installed"
+    echo "=== tasks (crontab) ==="
+    crontab -l 2>/dev/null | grep "upend-task" || echo "none installed"
 
     echo ""
     echo "=== last deploy ==="

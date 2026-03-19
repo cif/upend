@@ -63,9 +63,9 @@
       <button @click="rightPanel = 'data'"
         :class="rightPanel === 'data' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
         class="px-3 py-1 text-xs rounded cursor-pointer font-mono">data</button>
-      <button @click="rightPanel = 'workflows'; loadWorkflows()"
-        :class="rightPanel === 'workflows' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
-        class="px-3 py-1 text-xs rounded cursor-pointer font-mono">workflows</button>
+      <button @click="rightPanel = 'tasks'; loadTasks()"
+        :class="rightPanel === 'tasks' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
+        class="px-3 py-1 text-xs rounded cursor-pointer font-mono">tasks</button>
       <button @click="rightPanel = 'audit'; loadAuditLog()"
         :class="rightPanel === 'audit' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
         class="px-3 py-1 text-xs rounded cursor-pointer font-mono">audit</button>
@@ -95,6 +95,7 @@
   </div>
   <div class="flex items-center gap-3">
     <span class="text-muted text-xs truncate max-w-[200px]" x-text="sessionLabel"></span>
+    <span x-show="currentWorktree" class="text-muted/40 text-[10px] font-mono" x-text="currentWorktree"></span>
     <span class="flex items-center gap-1">
       <span class="w-1.5 h-1.5 rounded-full"
         :class="{ 'bg-muted': status === 'ready', 'bg-green-500': status === 'active' || status === 'done',
@@ -126,15 +127,37 @@
     <span class="text-muted text-xs uppercase tracking-wide">sessions</span>
     <button @click="newSession()" class="bg-accent text-white text-xs px-3 py-1 rounded cursor-pointer font-mono">+ new</button>
   </div>
+  <div x-show="currentSessionId" class="px-2 mb-2">
+    <button @click="currentSessionId = null; currentWorktree = null; messages = []; drawerOpen = false; history.replaceState(null, '', '/')"
+      class="w-full text-left px-3 py-2 rounded-md text-xs text-muted hover:bg-border hover:text-gray-200 cursor-pointer font-mono">
+      ← back to main
+    </button>
+  </div>
   <div class="flex-1 overflow-y-auto px-2 no-scrollbar">
-    <template x-for="s in sessions.filter(s => s.status === 'active')" :key="s.id">
-      <div @click="openSession(s.id)"
-        :class="s.id == currentSessionId ? 'bg-accent-dim text-accent' : 'text-muted hover:bg-border hover:text-gray-200'"
-        class="px-3 py-2 rounded-md cursor-pointer text-xs truncate mb-0.5"
-        x-text="s.title || s.prompt.slice(0, 50)"></div>
-    </template>
-    <p x-show="sessions.filter(s => s.status === 'active').length === 0"
-      class="text-muted text-xs text-center py-6">no active sessions</p>
+    <!-- active sessions -->
+    <div x-show="sessions.filter(s => s.status === 'active').length > 0" class="mb-3">
+      <div class="px-2 py-1 text-[10px] text-accent uppercase tracking-wide">active</div>
+      <template x-for="s in sessions.filter(s => s.status === 'active')" :key="s.id">
+        <div @click="openSession(s.id)"
+          :class="s.id == currentSessionId ? 'bg-accent-dim text-accent' : 'text-muted hover:bg-border hover:text-gray-200'"
+          class="px-3 py-2 rounded-md cursor-pointer text-xs truncate mb-0.5"
+          x-text="s.title || s.prompt.slice(0, 50)"></div>
+      </template>
+    </div>
+
+    <!-- closed/committed sessions -->
+    <div x-show="sessions.filter(s => s.status !== 'active').length > 0">
+      <div class="px-2 py-1 text-[10px] text-muted uppercase tracking-wide">recent</div>
+      <template x-for="s in sessions.filter(s => s.status !== 'active')" :key="s.id">
+        <div @click="openSession(s.id)"
+          class="px-3 py-2 rounded-md cursor-pointer text-xs truncate mb-0.5 text-muted/60 hover:bg-border hover:text-muted">
+          <span x-text="s.title || s.prompt.slice(0, 50)"></span>
+          <span class="text-[10px] ml-1" :class="s.status === 'committed' ? 'text-green-500/60' : 'text-muted/40'" x-text="s.status"></span>
+        </div>
+      </template>
+    </div>
+
+    <p x-show="sessions.length === 0" class="text-muted text-xs text-center py-6">no sessions</p>
   </div>
 </div>
 
@@ -223,17 +246,22 @@
     <div class="flex-1 overflow-y-auto px-5 py-4 space-y-4 no-scrollbar" x-ref="messages">
       <template x-for="(msg, i) in messages" :key="i">
         <div class="max-w-3xl mx-auto">
-          <div class="text-xs font-bold uppercase tracking-wide mb-1"
-            :class="{ 'text-blue-500': msg.role === 'user', 'text-accent': msg.role === 'assistant', 'text-muted': msg.role === 'system' }"
-            x-text="msg.role"></div>
           <template x-if="msg.role === 'tool_use'">
-            <div class="bg-surface border border-border rounded-md px-3 py-2">
-              <div class="text-green-500 text-xs font-bold" x-text="'▶ ' + msg.name"></div>
-              <pre class="text-muted text-xs mt-1 overflow-x-auto" x-text="typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)"></pre>
-            </div>
+            <details class="bg-surface border border-border rounded-md">
+              <summary class="px-3 py-1.5 text-xs cursor-pointer flex items-center gap-2 text-muted hover:text-gray-200">
+                <span class="text-muted font-bold" x-text="msg.name"></span>
+                <span class="text-muted/50 truncate text-[11px]" x-text="msg.content?.description || msg.content?.command?.slice(0, 60) || msg.content?.pattern || msg.content?.file_path?.split('/').pop() || ''"></span>
+              </summary>
+              <pre class="text-muted text-xs px-3 py-2 overflow-x-auto border-t border-border" x-text="typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)"></pre>
+            </details>
           </template>
           <template x-if="msg.role !== 'tool_use'">
-            <div class="text-sm leading-relaxed whitespace-pre-wrap break-words" x-text="msg.content"></div>
+            <div>
+              <div x-show="msg.role !== 'tool_use'" class="text-xs font-bold uppercase tracking-wide mb-1"
+                :class="{ 'text-blue-500': msg.role === 'user', 'text-accent': msg.role === 'assistant', 'text-muted': msg.role === 'system' }"
+                x-text="msg.role"></div>
+              <div class="text-sm leading-relaxed whitespace-pre-wrap break-words" x-text="msg.content"></div>
+            </div>
           </template>
         </div>
       </template>
@@ -248,11 +276,23 @@
         <textarea x-model="prompt" x-ref="chatInput" rows="1" placeholder="tell claude what to do..."
           @keydown.enter.prevent="if(!$event.shiftKey) sendPrompt()"
           @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 200) + 'px'"
+          @paste="handlePaste($event)"
           class="flex-1 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-gray-200 font-mono resize-none outline-none focus:border-accent min-h-[40px] max-h-[200px]"></textarea>
+        <label class="bg-surface border border-border rounded-lg px-3 py-2 cursor-pointer shrink-0 text-muted hover:text-accent hover:border-accent flex items-center">
+          <i data-lucide="paperclip" class="w-4 h-4"></i>
+          <input type="file" class="hidden" multiple @change="handleFileUpload($event)">
+        </label>
         <button type="submit" :disabled="isRunning || !prompt.trim()"
           class="bg-accent text-black px-5 py-2 rounded-lg text-sm font-bold cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed font-mono">send</button>
       </form>
-      <p class="max-w-3xl mx-auto text-muted text-xs mt-2">shift+enter for newline</p>
+      <div x-show="attachments.length > 0" class="max-w-3xl mx-auto flex gap-2 mt-2 flex-wrap">
+        <template x-for="(a, i) in attachments" :key="i">
+          <div class="flex items-center gap-1 bg-surface border border-border rounded px-2 py-1 text-xs text-muted">
+            <span x-text="a.name"></span>
+            <button @click="attachments.splice(i, 1)" class="text-muted hover:text-red-400 cursor-pointer">&times;</button>
+          </div>
+        </template>
+      </div>
     </div>
   </div>
 
@@ -263,8 +303,8 @@
   <!-- right panel -->
   <div class="flex-1 min-h-0 min-w-0 overflow-y-auto" id="panel-right">
     <!-- app iframe -->
-    <iframe x-show="!['data','home','workflows','audit'].includes(rightPanel)" x-ref="rightIframe" class="w-full h-full border-none"
-      :src="token && !['data','home','workflows','audit'].includes(rightPanel) ? appUrl(rightPanel) : 'about:blank'"></iframe>
+    <iframe x-show="!['data','home','tasks','audit'].includes(rightPanel)" x-ref="rightIframe" class="w-full h-full border-none"
+      :src="token && !['data','home','tasks','audit'].includes(rightPanel) ? appUrl(rightPanel) : 'about:blank'"></iframe>
 
     <!-- home panel -->
     <div x-show="rightPanel === 'home'" class="p-8 max-w-2xl mx-auto">
@@ -324,7 +364,7 @@
                     'bg-blue-500/20 text-blue-400': entry.action?.includes('signup'),
                     'bg-yellow-500/20 text-yellow-400': entry.action?.includes('impersonate'),
                     'bg-accent/20 text-accent': entry.action?.includes('session'),
-                    'bg-purple-500/20 text-purple-400': entry.action?.includes('workflow'),
+                    'bg-purple-500/20 text-purple-400': entry.action?.includes('task'),
                     'bg-red-500/20 text-red-400': entry.action?.includes('commit'),
                   }"
                   x-text="entry.action"></span>
@@ -337,19 +377,19 @@
       </table>
     </div>
 
-    <!-- workflows panel -->
-    <div x-show="rightPanel === 'workflows'" class="flex flex-col h-full overflow-y-auto">
+    <!-- tasks panel -->
+    <div x-show="rightPanel === 'tasks'" class="flex flex-col h-full overflow-y-auto">
       <div class="px-4 py-3 border-b border-border flex items-center justify-between">
-        <span class="text-sm font-bold text-gray-200 font-mono">workflows</span>
-        <button @click="prompt = 'create a new workflow in workflows/ that '; $refs.chatInput.focus()"
-          class="text-xs text-muted border border-border px-3 py-1 rounded cursor-pointer hover:text-accent hover:border-accent font-mono">+ new workflow</button>
+        <span class="text-sm font-bold text-gray-200 font-mono">tasks</span>
+        <button @click="prompt = 'create a new task in tasks/ that '; $refs.chatInput.focus()"
+          class="text-xs text-muted border border-border px-3 py-1 rounded cursor-pointer hover:text-accent hover:border-accent font-mono">+ new task</button>
       </div>
 
-      <div x-show="workflowsList.length === 0" class="p-8 text-center text-muted text-sm">
-        no workflows yet — ask Claude to create one, or add a .ts file to workflows/
+      <div x-show="tasksList.length === 0" class="p-8 text-center text-muted text-sm">
+        no tasks yet — ask Claude to create one, or add a .ts file to tasks/
       </div>
 
-      <template x-for="wf in workflowsList" :key="wf.name">
+      <template x-for="wf in tasksList" :key="wf.name">
         <div class="px-4 py-3 border-b border-border/50 hover:bg-surface/50">
           <div class="flex items-center justify-between mb-1">
             <div class="flex items-center gap-2">
@@ -361,7 +401,7 @@
               <span x-show="wf._result !== undefined && !wf._running"
                 :class="wf._result === 0 ? 'text-green-400' : 'text-red-400'"
                 class="text-xs" x-text="wf._result === 0 ? 'success' : 'failed'"></span>
-              <button @click="runWorkflow(wf)"
+              <button @click="runTask(wf)"
                 :disabled="wf._running"
                 class="text-xs text-muted border border-border px-2 py-1 rounded cursor-pointer hover:text-accent hover:border-accent font-mono disabled:opacity-40">run</button>
             </div>
@@ -525,7 +565,7 @@ function dashboard() {
 
     // sessions
     sessions: [],
-    currentSessionId: localStorage.getItem('upend_dashboard_session') ? Number(localStorage.getItem('upend_dashboard_session')) : null,
+    currentSessionId: null,
     currentWorktree: null,
     drawerOpen: false,
 
@@ -558,8 +598,9 @@ function dashboard() {
     tableRLSEnabled: false,
     allPolicies: [],
     allRLSTables: [],
-    workflowsList: [],
+    tasksList: [],
     auditEntries: [],
+    attachments: [],
     rightPanel: 'home',
     apps: [],
     appsOpen: false,
@@ -585,10 +626,28 @@ function dashboard() {
       if (this.token) {
         this.loadApps();
         this.loadTables();
-        if (this.currentSessionId) {
+
+        // check URL for session name: /session/<name> or /<session-name>
+        const path = window.location.pathname;
+        const sessionMatch = path.match(/^\/session\/(.+)/);
+        if (sessionMatch) {
+          this.openSessionByName(sessionMatch[1]);
+        } else if (this.currentSessionId) {
           this.openSession(this.currentSessionId);
         }
       }
+
+      // update URL when session changes
+      this.$watch('currentSessionId', (id) => {
+        if (id) {
+          const s = this.sessions.find(s => s.id == id);
+          const ctx = typeof s?.context === 'string' ? JSON.parse(s.context) : s?.context;
+          const name = ctx?.worktree || s?.snapshotName;
+          if (name) history.replaceState(null, '', `/session/${name}`);
+        } else {
+          history.replaceState(null, '', '/');
+        }
+      });
       document.addEventListener('mousemove', (e) => this.onResize(e));
       document.addEventListener('mouseup', () => this.stopResize());
     },
@@ -609,7 +668,13 @@ function dashboard() {
         this.userEmail = data.user.email;
         localStorage.setItem('upend_token', this.token);
         localStorage.setItem('upend_email', this.userEmail);
+        document.cookie = `upend_token=${this.token}; path=/; SameSite=Lax; max-age=86400`;
         this.loadApps();
+        this.loadTables();
+        // restore session from URL after login
+        const path = window.location.pathname;
+        const sessionMatch = path.match(/^\/session\/(.+)/);
+        if (sessionMatch) this.openSessionByName(sessionMatch[1]);
       } catch (err) {
         this.authError = err.message;
       }
@@ -620,14 +685,16 @@ function dashboard() {
       this.userEmail = '';
       localStorage.removeItem('upend_token');
       localStorage.removeItem('upend_email');
-      localStorage.removeItem('upend_dashboard_session');
+            document.cookie = 'upend_token=; path=/; max-age=0';
       if (this.ws) { this.ws.close(); this.ws = null; }
       this.messages = [];
       this.currentSessionId = null;
     },
 
     authHeaders() {
-      return { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' };
+      const h = { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' };
+      if (this.currentWorktree) h['X-Upend-Session'] = this.currentWorktree;
+      return h;
     },
 
     async authFetch(url, opts = {}) {
@@ -642,6 +709,19 @@ function dashboard() {
     },
 
     // ---------- sessions ----------
+
+    async openSessionByName(name) {
+      await this.loadSessions();
+      const session = this.sessions.find(s => {
+        const ctx = typeof s.context === 'string' ? JSON.parse(s.context) : s.context;
+        return ctx?.worktree === name || s.snapshotName === name;
+      });
+      if (session) {
+        this.openSession(session.id);
+      } else {
+        this.messages.push({ role: 'system', content: `session "${name}" not found` });
+      }
+    },
 
     async loadSessions() {
       try {
@@ -660,9 +740,9 @@ function dashboard() {
 
         this.currentSessionId = Number(id);
         const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
-        this.currentWorktree = ctx?.worktree || null;
-        localStorage.setItem('upend_dashboard_session', id);
-        this.drawerOpen = false;
+        // only use worktree for active sessions — closed/committed sessions show main
+        this.currentWorktree = session.status === 'active' ? (ctx?.worktree || null) : null;
+                this.drawerOpen = false;
 
         // render messages
         this.messages = [];
@@ -694,15 +774,13 @@ function dashboard() {
         console.error('[openSession]', err);
         this.messages.push({ role: 'system', content: `could not load session ${id}: ${err.message}` });
         this.currentSessionId = null;
-        localStorage.removeItem('upend_dashboard_session');
-      }
+              }
     },
 
     newSession() {
       this.currentSessionId = null;
       this.currentWorktree = null;
-      localStorage.removeItem('upend_dashboard_session');
-      this.messages = [];
+            this.messages = [];
       this.drawerOpen = false;
       if (this.ws) { this.ws.close(); this.ws = null; }
       this.setStatus('ready', 'ready');
@@ -718,8 +796,7 @@ function dashboard() {
       this.setStatus('ready', 'closed');
       this.currentSessionId = null;
       this.currentWorktree = null;
-      localStorage.removeItem('upend_dashboard_session');
-      if (this.ws) { this.ws.close(); this.ws = null; }
+            if (this.ws) { this.ws.close(); this.ws = null; }
       this.loadSessions();
       this.loadApps();
     },
@@ -757,21 +834,84 @@ function dashboard() {
 
         this.messages.push({ role: 'system', content: 'published to live. services restarting.' });
         this.setStatus('done', 'committed');
+        const appShowing = this.rightPanel;
         this.currentSessionId = null;
-        localStorage.removeItem('upend_dashboard_session');
-        if (this.ws) { this.ws.close(); this.ws = null; }
+        this.currentWorktree = null;
+                if (this.ws) { this.ws.close(); this.ws = null; }
         this.loadSessions();
-        this.refreshRightPanel();
+        // force iframe reload with cache bust after worktree clears
+        this.$nextTick(() => {
+          const iframe = this.$refs.rightIframe;
+          if (iframe && appShowing && !['data','home','tasks','audit'].includes(appShowing)) {
+            iframe.src = this.appUrl(appShowing) + '?t=' + Date.now();
+          }
+          this.loadTables();
+        });
       } catch (err) {
         this.messages.push({ role: 'system', content: `commit failed: ${err.message}` });
       }
     },
 
+    // ---------- attachments ----------
+
+    async handlePaste(event) {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          event.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            const b64 = await this.fileToBase64(file);
+            this.attachments.push({ name: file.name || 'pasted-image.png', type: file.type, data: b64 });
+          }
+        }
+      }
+    },
+
+    async handleFileUpload(event) {
+      for (const file of event.target.files) {
+        const b64 = await this.fileToBase64(file);
+        this.attachments.push({ name: file.name, type: file.type, data: b64 });
+      }
+      event.target.value = '';
+    },
+
+    fileToBase64(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.readAsDataURL(file);
+      });
+    },
+
     // ---------- chat ----------
 
     async sendPrompt() {
-      const text = this.prompt.trim();
-      if (!text || this.isRunning) return;
+      let text = this.prompt.trim();
+      if ((!text && !this.attachments.length) || this.isRunning) return;
+
+      // upload attachments to worktree, add paths to prompt
+      if (this.attachments.length > 0) {
+        const uploaded = [];
+        for (const a of this.attachments) {
+          try {
+            const res = await this.authFetch('/claude/upload', {
+              method: 'POST',
+              body: JSON.stringify({ name: a.name, type: a.type, data: a.data }),
+            });
+            if (res?.ok) {
+              const { path } = await res.json();
+              uploaded.push(path);
+            }
+          } catch {}
+        }
+        if (uploaded.length > 0) {
+          text = text ? `${text}\n\nI've attached files: ${uploaded.join(', ')}` : `Look at these files: ${uploaded.join(', ')}`;
+        }
+        this.attachments = [];
+      }
+
       this.prompt = '';
       this.messages.push({ role: 'user', content: text });
       this.scrollToBottom();
@@ -799,8 +939,7 @@ function dashboard() {
 
         this.currentSessionId = Number(data.session.id);
         this.currentWorktree = data.worktree;
-        localStorage.setItem('upend_dashboard_session', this.currentSessionId);
-        this.connectWS(this.currentSessionId);
+                this.connectWS(this.currentSessionId);
         this.loadSessions();
         this.loadApps();
       } catch (err) {
@@ -857,6 +996,10 @@ function dashboard() {
         }
 
         else if (data.type === 'tool_use') {
+          // end current streaming message, reset buffer for next text block
+          const last = this.messages[this.messages.length - 1];
+          if (last?._streaming) delete last._streaming;
+          this.assistantBuffer = '';
           this.messages.push({ role: 'tool_use', name: data.name, content: data.input });
           this.scrollToBottom();
         }
@@ -869,9 +1012,10 @@ function dashboard() {
             // mark streaming message as final
             const last = this.messages[this.messages.length - 1];
             if (last?._streaming) delete last._streaming;
-            // refresh right panel
+            // refresh everything
             this.refreshRightPanel();
             this.loadApps();
+            this.loadTasks();
           } else if (data.status === 'error') {
             this.assistantBuffer = '';
             this.isRunning = false;
@@ -970,9 +1114,7 @@ function dashboard() {
 
     async loadApps() {
       try {
-        const url = this.currentWorktree
-          ? `/claude/apps?session=${this.currentWorktree}`
-          : '/claude/apps';
+        const url = '/api/apps';
         const res = await this.authFetch(url);
         if (res?.ok) this.apps = await res.json();
       } catch {}
@@ -1014,19 +1156,19 @@ function dashboard() {
       } catch {}
     },
 
-    async loadWorkflows() {
+    async loadTasks() {
       try {
-        const res = await this.authFetch('/api/workflows');
-        if (res.ok) this.workflowsList = (await res.json()).map(w => ({ ...w, _running: false, _result: undefined, _output: '' }));
+        const res = await this.authFetch('/api/tasks');
+        if (res.ok) this.tasksList = (await res.json()).map(w => ({ ...w, _running: false, _result: undefined, _output: '' }));
       } catch {}
     },
 
-    async runWorkflow(wf) {
+    async runTask(wf) {
       wf._running = true;
       wf._result = undefined;
       wf._output = '';
       try {
-        const res = await this.authFetch(`/api/workflows/${wf.name}/run`, { method: 'POST' });
+        const res = await this.authFetch(`/api/tasks/${wf.name}/run`, { method: 'POST' });
         const data = await res.json();
         wf._result = data.exitCode;
         wf._output = (data.stdout || '') + (data.stderr ? '\n' + data.stderr : '');
@@ -1039,7 +1181,11 @@ function dashboard() {
 
     refreshRightPanel() {
       const iframe = this.$refs.rightIframe;
-      if (iframe?.src && iframe.src !== 'about:blank') iframe.src = iframe.src;
+      if (iframe?.src && iframe.src !== 'about:blank') {
+        const url = new URL(iframe.src);
+        url.searchParams.set('t', Date.now().toString());
+        iframe.src = url.toString();
+      }
       this.loadTables();
       if (this.selectedTable) this.selectTable(this.selectedTable);
     },

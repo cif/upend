@@ -3,7 +3,7 @@ import { exec } from "../lib/exec";
 import { readdirSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 
-type Workflow = {
+type Task = {
   name: string;
   file: string;
   cron: string | null;
@@ -11,32 +11,32 @@ type Workflow = {
   installed: boolean;
 };
 
-export default async function workflows(args: string[]) {
+export default async function tasks(args: string[]) {
   const sub = args[0];
   const projectDir = resolve(".");
-  const workflowsDir = join(projectDir, "workflows");
+  const tasksDir = join(projectDir, "tasks");
 
   switch (sub) {
     case "list":
     case undefined:
-      await list(workflowsDir);
+      await list(tasksDir);
       break;
     case "run":
-      await run(workflowsDir, args[1]);
+      await run(tasksDir, args[1]);
       break;
     case "install":
-      await install(workflowsDir);
+      await install(tasksDir);
       break;
     case "uninstall":
       await uninstall();
       break;
     default:
-      // treat it as a workflow name to run
-      await run(workflowsDir, sub);
+      // treat it as a task name to run
+      await run(tasksDir, sub);
   }
 }
 
-function parseWorkflows(dir: string): Workflow[] {
+function parseTasks(dir: string): Task[] {
   let files: string[];
   try {
     files = readdirSync(dir).filter(f => f.endsWith(".ts") || f.endsWith(".js"));
@@ -61,17 +61,17 @@ async function getCrontab(): Promise<string> {
 }
 
 async function list(dir: string) {
-  const wfs = parseWorkflows(dir);
+  const wfs = parseTasks(dir);
   if (wfs.length === 0) {
-    log.info("no workflows found in workflows/");
+    log.info("no tasks found in tasks/");
     return;
   }
 
   const crontab = await getCrontab();
 
-  log.header("workflows");
+  log.header("tasks");
   for (const wf of wfs) {
-    const installed = crontab.includes(`workflows/${wf.file}`);
+    const installed = crontab.includes(`tasks/${wf.file}`);
     const status = installed ? "installed" : wf.cron ? "not installed" : "manual only";
     const statusColor = installed ? "\x1b[32m" : "\x1b[90m";
     console.log(`  ${wf.name}`);
@@ -84,7 +84,7 @@ async function list(dir: string) {
 
 async function run(dir: string, name?: string) {
   if (!name) {
-    log.error("usage: upend workflows run <name>");
+    log.error("usage: upend tasks run <name>");
     process.exit(1);
   }
 
@@ -104,18 +104,18 @@ async function run(dir: string, name?: string) {
 }
 
 async function install(dir: string) {
-  const wfs = parseWorkflows(dir).filter(w => w.cron);
+  const wfs = parseTasks(dir).filter(w => w.cron);
   if (wfs.length === 0) {
-    log.info("no workflows with @cron found");
+    log.info("no tasks with @cron found");
     return;
   }
 
   const crontab = await getCrontab();
-  const lines = crontab.split("\n").filter(l => !l.includes("# upend-workflow:"));
+  const lines = crontab.split("\n").filter(l => !l.includes("# upend-task:"));
   const projectDir = resolve(".");
 
   for (const wf of wfs) {
-    lines.push(`${wf.cron} cd ${projectDir} && bun workflows/${wf.file} >> /tmp/upend-workflow-${wf.name}.log 2>&1 # upend-workflow: ${wf.name}`);
+    lines.push(`${wf.cron} cd ${projectDir} && bun tasks/${wf.file} >> /tmp/upend-task-${wf.name}.log 2>&1 # upend-task: ${wf.name}`);
     log.info(`installing ${wf.name}: ${wf.cron}`);
   }
 
@@ -125,12 +125,12 @@ async function install(dir: string) {
   proc.stdin.end();
   await proc.exited;
 
-  log.success(`${wfs.length} workflow(s) installed`);
+  log.success(`${wfs.length} task(s) installed`);
 }
 
 async function uninstall() {
   const crontab = await getCrontab();
-  const lines = crontab.split("\n").filter(l => !l.includes("# upend-workflow:"));
+  const lines = crontab.split("\n").filter(l => !l.includes("# upend-task:"));
   const newCrontab = lines.filter(Boolean).join("\n") + "\n";
 
   const proc = Bun.spawn(["crontab", "-"], { stdin: "pipe" });
@@ -138,5 +138,5 @@ async function uninstall() {
   proc.stdin.end();
   await proc.exited;
 
-  log.success("all upend workflows removed from crontab");
+  log.success("all upend tasks removed from crontab");
 }

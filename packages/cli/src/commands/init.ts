@@ -222,13 +222,14 @@ CREATE TABLE IF NOT EXISTS users (
   mkdirSync(join(projectDir, "services"), { recursive: true });
   writeFile(projectDir, "services/.gitkeep", "");
 
-  // workflows
-  mkdirSync(join(projectDir, "workflows"), { recursive: true });
-  writeFile(projectDir, "workflows/example.ts", `// example workflow — runs on a schedule or manually
+  // tasks
+  mkdirSync(join(projectDir, "tasks"), { recursive: true });
+  writeFile(projectDir, "tasks/example.ts", `// example task — runs on a schedule or manually
 // @cron 0 */6 * * *
 // @description clean up ended sessions older than 7 days
 
 import postgres from "postgres";
+import { notify } from "@upend/cli/src/lib/notify";
 
 const sql = postgres(process.env.DATABASE_URL!);
 
@@ -238,12 +239,27 @@ export async function run() {
     WHERE status = 'ended' AND created_at < now() - interval '7 days'
     RETURNING id
   \`;
-  console.log(\`cleaned up \${deleted.length} old sessions\`);
+  const msg = \`cleaned up \${deleted.length} old sessions\`;
+  console.log(msg);
+
+  if (deleted.length > 0) {
+    await notify({ slack: "#tasks", text: msg });
+  }
 }
 
-// run directly: bun workflows/example.ts
+// run directly: bun tasks/example.ts
 run().then(() => process.exit(0));
 `);
+
+  // claude skills
+  const skillsDir = new URL("../skills", import.meta.url).pathname;
+  mkdirSync(join(projectDir, ".claude/commands"), { recursive: true });
+  for (const skill of ["diagnose.md", "aws.md", "deploy.md", "register.md"]) {
+    writeFileSync(
+      join(projectDir, `.claude/commands/${skill}`),
+      readFileSync(join(skillsDir, skill), "utf-8")
+    );
+  }
 
   // CLAUDE.md
   writeFile(projectDir, "CLAUDE.md", `# ${name}
@@ -310,21 +326,36 @@ Available session variables in RLS policies:
 The dashboard data tab shows active RLS policies per table so users can see what rules are in place.
 The \`apps/users/\` app is an example of the access control pattern.
 
+## Notifications
+Send email and Slack notifications from tasks or services:
+\`\`\`ts
+import { notify } from "@upend/cli/src/lib/notify";
+
+// email
+await notify({ email: "ben@example.com", subject: "Job done", body: "Cleaned up 5 sessions" });
+
+// slack (channel name — requires SLACK_BOT_TOKEN)
+await notify({ slack: "#tasks", text: "session cleanup complete" });
+
+// slack (webhook URL — no token needed)
+await notify({ slack: "https://hooks.slack.com/services/xxx", text: "done" });
+
+// both at once
+await notify({ email: "ben@example.com", slack: "#ops", subject: "Alert", body: "something happened" });
+\`\`\`
+
+Env vars: \`RESEND_API_KEY\` for email, \`SLACK_BOT_TOKEN\` or webhook URL for Slack.
+
 ## Conventions
 - Migrations: plain SQL in \`migrations/\`, numbered \`001_name.sql\`
 - Apps: static HTML/JS/CSS in \`apps/<name>/\`
 - Custom services: \`services/<name>/index.ts\`
+- Tasks: \`tasks/<name>.ts\` with \`@cron\` and \`@description\` comments
 `);
 
   log.success("project scaffolded");
 
-  // ── 4. encrypt .env ──
-
-  if (databaseUrl) {
-    log.info("encrypting .env...");
-    await exec(["bunx", "@dotenvx/dotenvx", "encrypt"], { cwd: projectDir });
-    log.success(".env encrypted");
-  }
+  // .env is plain text, gitignored — Bun auto-loads it
 
   // ── 5. git init ──
 
@@ -345,7 +376,7 @@ The \`apps/users/\` app is an example of the access control pattern.
   if (databaseUrl) {
     // run migrations (bootstrap + user's 001_init.sql which creates users table)
     log.info("running migrations...");
-    await exec(["bunx", "@dotenvx/dotenvx", "run", "--", "bunx", "upend", "migrate"], { cwd: projectDir });
+    await exec(["bunx", "upend", "migrate"], { cwd: projectDir });
     log.success("database ready");
 
     // prompt: create admin or enable signup?
@@ -440,14 +471,12 @@ function writeFile(dir: string, path: string, content: string) {
 }
 
 async function setEnvVar(projectDir: string, key: string, value: string) {
-  await exec(["bunx", "@dotenvx/dotenvx", "decrypt"], { cwd: projectDir, silent: true });
   const envFile = readFileSync(join(projectDir, ".env"), "utf-8");
   const regex = new RegExp(`^${key}=.*$`, "m");
   const updated = regex.test(envFile)
     ? envFile.replace(regex, `${key}=${value}`)
     : envFile.trimEnd() + `\n${key}=${value}\n`;
   writeFileSync(join(projectDir, ".env"), updated);
-  await exec(["bunx", "@dotenvx/dotenvx", "encrypt"], { cwd: projectDir, silent: true });
 }
 
 function getFlag(args: string[], flag: string): string | undefined {

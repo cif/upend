@@ -69,6 +69,7 @@ authRoutes.post("/auth/login", async (c) => {
   const valid = await Bun.password.verify(password, user.passwordHash);
   if (!valid) return c.json({ error: "invalid credentials" }, 401);
 
+  await sql`UPDATE users SET last_login = now() WHERE id = ${user.id}`;
   const token = await signToken(user.id, user.email, user.role);
   await audit("user.login", { actorId: user.id, actorEmail: user.email, targetType: "user", targetId: user.id });
   return c.json({
@@ -187,6 +188,7 @@ authRoutes.get("/auth/sso/:provider/callback", async (c) => {
     `;
   }
 
+  await sql`UPDATE users SET last_login = now() WHERE id = ${user.id}`;
   // issue OUR JWT — same as email/password login
   const token = await signToken(user.id, email, user.role);
 

@@ -24,6 +24,7 @@
           <th class="pb-2 font-normal">email</th>
           <th class="pb-2 font-normal">role</th>
           <th class="pb-2 font-normal">created</th>
+          <th class="pb-2 font-normal">last login</th>
           <th class="pb-2 font-normal w-40"></th>
         </tr>
       </thead>
@@ -110,7 +111,7 @@ async function api(url, opts = {}) {
 
 async function load() {
   // everyone sees all users
-  const res = await api('/api/data/users?select=id,email,role,created_at&order=created_at.desc');
+  const res = await api('/api/data/users?select=id,email,role,created_at,last_login&order=created_at.desc');
   if (!res.ok) { console.error('failed to load users', await res.text()); return; }
   const users = await res.json();
   render(users);
@@ -126,7 +127,8 @@ function render(users) {
       <td class="py-2.5">
         <span class="px-2 py-0.5 rounded text-xs ${u.role === 'admin' ? 'bg-accent/20 text-accent' : 'bg-border text-muted'}">${u.role}</span>
       </td>
-      <td class="py-2.5 text-muted text-xs">${new Date(u.created_at).toLocaleDateString()}</td>
+      <td class="py-2.5 text-muted text-xs">${new Date(u.createdAt).toLocaleDateString()}</td>
+      <td class="py-2.5 text-muted text-xs">${u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : '—'}</td>
       <td class="py-2.5 text-right space-x-2">
         ${canEdit ? `<button onclick='editUser(${JSON.stringify(u).replace(/'/g, "&#39;")})' class="text-muted text-xs hover:text-gray-200 cursor-pointer">edit</button>` : ''}
         ${isAdmin && !isMe ? `<button onclick='impersonate("${u.id}")' class="text-muted text-xs hover:text-yellow-400 cursor-pointer">impersonate</button>` : ''}

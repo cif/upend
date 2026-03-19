@@ -130,8 +130,9 @@
       <i data-lucide="rocket" class="w-3 h-3"></i> publish
     </button>
     <span class="text-muted text-xs" x-text="userEmail"></span>
-    <button @click="toggleTheme()" class="text-muted px-1.5 py-0.5 rounded text-xs cursor-pointer hover:text-gray-200 hover:bg-border" :title="darkMode ? 'switch to light mode' : 'switch to dark mode'">
-      <span x-show="darkMode">&#9788;</span><span x-show="!darkMode">&#9790;</span>
+    <button @click="toggleTheme()" class="text-muted px-1.5 py-0.5 rounded cursor-pointer hover:text-gray-200 hover:bg-border" :title="darkMode ? 'switch to light mode' : 'switch to dark mode'">
+      <i x-show="darkMode" data-lucide="sun" class="w-3.5 h-3.5"></i>
+      <i x-show="!darkMode" data-lucide="moon" class="w-3.5 h-3.5"></i>
     </button>
     <button @click="logout()"
       class="text-muted border border-border px-2 py-0.5 rounded text-xs cursor-pointer hover:text-gray-200 hover:border-muted font-mono">logout</button>
@@ -276,7 +277,7 @@
 <!-- main panels -->
 <div x-show="token" class="flex-1 flex min-h-0">
   <!-- left: chat (native DOM) -->
-  <div class="flex flex-col min-h-0 min-w-0" id="panel-left" style="flex: 0 0 420px; max-width: 520px;">
+  <div class="flex flex-col min-h-0 min-w-0" id="panel-left" style="flex: 0 0 550px;">
     <!-- messages -->
     <div class="flex-1 overflow-y-auto px-5 py-4 space-y-4 no-scrollbar" x-ref="messages">
       <template x-for="(msg, i) in messages" :key="i">
@@ -311,7 +312,7 @@
       </div>
     </div>
     <!-- input (active session) -->
-    <div x-show="currentSessionId" class="border-t border-border px-5 py-3 shrink-0">
+    <div x-show="sessionStatus === 'active'" class="border-t border-border px-5 py-3 shrink-0">
       <form @submit.prevent="sendPrompt()" class="max-w-3xl mx-auto flex gap-2">
         <textarea x-model="prompt" x-ref="chatInput" rows="1" placeholder="tell claude what to do..."
           @keydown.enter.prevent="if(!$event.shiftKey) sendPrompt()"
@@ -334,10 +335,11 @@
         </template>
       </div>
     </div>
-    <!-- no active session -->
-    <div x-show="!currentSessionId" class="border-t border-border px-5 py-4 shrink-0">
+    <!-- closed/committed/no session -->
+    <div x-show="sessionStatus !== 'active'" class="border-t border-border px-5 py-4 shrink-0">
       <div class="max-w-3xl mx-auto flex items-center justify-between">
-        <span class="text-muted text-sm font-mono" x-text="messages.length ? 'session closed' : 'no active session'"></span>
+        <span class="text-sm font-mono" :class="sessionStatus === 'committed' ? 'text-green-500' : 'text-muted'"
+          x-text="sessionStatus === 'committed' ? 'session committed' : sessionStatus === 'ended' ? 'session closed' : 'no active session'"></span>
         <button @click="newSession()" class="bg-accent text-black text-xs px-4 py-1.5 rounded font-bold cursor-pointer font-mono">+ new session</button>
       </div>
     </div>
@@ -348,7 +350,14 @@
     @mousedown="startResize($event)"></div>
 
   <!-- right panel -->
-  <div class="flex-1 min-h-0 min-w-0 overflow-y-auto" id="panel-right">
+  <div class="flex-1 min-h-0 min-w-0 overflow-y-auto relative" id="panel-right">
+    <!-- pop-out button -->
+    <button x-show="!['data','home','tasks','audit'].includes(rightPanel)"
+      @click="window.open(appUrl(rightPanel), '_blank')"
+      class="absolute top-2 right-2 z-20 bg-surface/80 border border-border rounded p-1.5 text-muted hover:text-accent hover:border-accent cursor-pointer backdrop-blur-sm"
+      title="open in new window">
+      <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+    </button>
     <!-- app iframe -->
     <iframe x-show="!['data','home','tasks','audit'].includes(rightPanel)" x-ref="rightIframe" class="w-full h-full border-none"
       :src="token && !['data','home','tasks','audit'].includes(rightPanel) ? appUrl(rightPanel) : 'about:blank'"></iframe>
@@ -696,6 +705,7 @@ function dashboard() {
     sessions: [],
     currentSessionId: null,
     currentWorktree: null,
+    sessionStatus: null,
     drawerOpen: false,
 
     // modals
@@ -821,6 +831,7 @@ function dashboard() {
         const builtins = { home: '/', data: '/data', tasks: '/tasks', audit: '/audit' };
         const url = builtins[panel] || `/app/${panel}`;
         if (window.location.pathname !== url) history.replaceState(null, '', url);
+        this.$nextTick(() => lucide?.createIcons());
       });
 
       // sync URL when selected table changes
@@ -894,6 +905,7 @@ function dashboard() {
       this.darkMode = !this.darkMode;
       sessionStorage.setItem('upend_theme', this.darkMode ? 'dark' : 'light');
       this.applyTheme();
+      this.$nextTick(() => lucide?.createIcons());
     },
 
     applyTheme() {
@@ -959,7 +971,7 @@ function dashboard() {
             document.cookie = 'upend_token=; path=/; max-age=0';
       if (this.ws) { this.ws.close(); this.ws = null; }
       this.messages = [];
-      this.currentSessionId = null;
+      this.currentSessionId = null; this.sessionStatus = null;
     },
 
     authHeaders() {
@@ -1010,6 +1022,7 @@ function dashboard() {
         const session = await res.json();
 
         this.currentSessionId = Number(id);
+        this.sessionStatus = session.status;
         const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
         // only use worktree for active sessions — closed/committed sessions show main
         this.currentWorktree = session.status === 'active' ? (ctx?.worktree || null) : null;
@@ -1044,12 +1057,12 @@ function dashboard() {
       } catch (err) {
         console.error('[openSession]', err);
         this.messages.push({ role: 'system', content: `could not load session ${id}: ${err.message}` });
-        this.currentSessionId = null;
+        this.currentSessionId = null; this.sessionStatus = null;
               }
     },
 
     newSession() {
-      this.currentSessionId = null;
+      this.currentSessionId = null; this.sessionStatus = null;
       this.currentWorktree = null;
       this.messages = [];
       this.drawerOpen = false;
@@ -1078,7 +1091,7 @@ function dashboard() {
       } catch {}
       this.messages.push({ role: 'system', content: 'session closed. changes preserved but not published.' });
       this.setStatus('ready', 'closed');
-      this.currentSessionId = null;
+      this.currentSessionId = null; this.sessionStatus = null;
       this.currentWorktree = null;
             if (this.ws) { this.ws.close(); this.ws = null; }
       this.loadSessions();
@@ -1122,7 +1135,7 @@ function dashboard() {
         this.messages.push({ role: 'system', content: 'published to live. services restarting.' });
         this.setStatus('done', 'committed');
         const appShowing = this.rightPanel;
-        this.currentSessionId = null;
+        this.currentSessionId = null; this.sessionStatus = null;
         this.currentWorktree = null;
                 if (this.ws) { this.ws.close(); this.ws = null; }
         this.loadSessions();
@@ -1225,6 +1238,7 @@ function dashboard() {
         if (!res.ok) throw new Error(data.error || data.message);
 
         this.currentSessionId = Number(data.session.id);
+        this.sessionStatus = 'active';
         this.currentWorktree = data.worktree;
                 this.connectWS(this.currentSessionId);
         this.loadSessions();

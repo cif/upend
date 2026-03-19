@@ -13,11 +13,11 @@ async function audit(action: string, opts: { actorId?: string; actorEmail?: stri
   }
 }
 
-// JWKS endpoint — public, Neon Authorize fetches this to validate JWTs
-authRoutes.get("/.well-known/jwks.json", async (c) => {
+// JWKS — exported so gateway can mount at root
+export async function jwksHandler(c: any) {
   const jwks = await getJWKS();
   return c.json(jwks);
-});
+}
 
 // signup (disabled by default — admin creates users, or set SIGNUP_ENABLED=true)
 authRoutes.post("/auth/signup", async (c) => {

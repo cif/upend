@@ -102,11 +102,11 @@
                   'bg-accent dot-pulse': status === 'running', 'bg-red-500': status === 'error' }"></span>
       <span class="text-muted text-xs" x-text="statusText"></span>
     </span>
-    <button x-show="currentSessionId" @click="showCloseModal = true"
+    <button x-show="currentSessionId && currentWorktree" @click="showCloseModal = true"
       class="text-muted px-1.5 py-0.5 rounded text-xs cursor-pointer hover:text-red-500" title="close session">
       <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
     </button>
-    <button x-show="currentSessionId" @click="commitSession()"
+    <button x-show="currentSessionId && currentWorktree" @click="commitSession()"
       class="flex items-center gap-1 text-green-500 border border-green-500 px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-green-500/10 font-mono">
       <i data-lucide="rocket" class="w-3 h-3"></i> publish
     </button>

@@ -62,6 +62,16 @@ app.post("/upload", async (c) => {
   return c.json({ path: filePath, name: safeName, size: buffer.length });
 });
 
+// ---------- startup: clean up orphaned messages from previous crashes ----------
+(async () => {
+  const orphaned = await sql`
+    UPDATE upend.session_messages SET status = 'error', result = 'interrupted by service restart'
+    WHERE status = 'running' RETURNING id, session_id`;
+  if (orphaned.length > 0) {
+    console.log(`[startup] cleaned up ${orphaned.length} orphaned running message(s): ${orphaned.map(m => `msg ${m.id} (session ${m.sessionId})`).join(', ')}`);
+  }
+})();
+
 // ---------- websocket clients ----------
 
 const wsClients = new Map<number, Set<any>>(); // sessionId → Set<ws>
@@ -463,7 +473,8 @@ const server = Bun.serve({
       console.log(`[ws] connected: session ${sessionId} (${wsClients.get(sessionId)!.size} clients)`);
     },
     message(ws, msg) {
-      // client can send ping, we don't need anything else
+      // respond to client pings to keep connection alive
+      if (msg === "ping") ws.send("pong");
     },
     close(ws) {
       const { sessionId } = ws.data as { sessionId: number };

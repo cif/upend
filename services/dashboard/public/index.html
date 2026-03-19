@@ -293,10 +293,12 @@
           </template>
           <template x-if="msg.role !== 'tool_use'">
             <div>
-              <div x-show="msg.role !== 'tool_use'" class="text-xs font-bold uppercase tracking-wide mb-1"
-                :class="{ 'text-blue-500': msg.role === 'user', 'text-accent': msg.role === 'assistant', 'text-muted': msg.role === 'system' }"
-                x-text="msg.role"></div>
-              <div class="text-sm leading-relaxed whitespace-pre-wrap break-words" x-text="msg.content"></div>
+              <div class="text-xs font-bold uppercase tracking-wide mb-1"
+                :class="{ 'text-blue-500': msg.role === 'user', 'text-accent': msg.role === 'assistant', 'text-red-400': msg.role === 'error', 'text-muted': msg.role === 'system' }"
+                x-text="msg.role === 'error' ? 'error' : msg.role"></div>
+              <div class="text-sm leading-relaxed whitespace-pre-wrap break-words"
+                :class="msg.role === 'error' ? 'text-red-400/80' : ''"
+                x-text="msg.content"></div>
             </div>
           </template>
         </div>
@@ -351,13 +353,19 @@
 
   <!-- right panel -->
   <div class="flex-1 min-h-0 min-w-0 overflow-y-auto relative" id="panel-right">
-    <!-- pop-out button -->
-    <button x-show="!['data','home','tasks','audit'].includes(rightPanel)"
-      @click="window.open(appUrl(rightPanel), '_blank')"
-      class="absolute top-2 right-2 z-20 bg-surface/80 border border-border rounded p-1.5 text-muted hover:text-accent hover:border-accent cursor-pointer backdrop-blur-sm"
-      title="open in new window">
-      <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
-    </button>
+    <!-- app iframe controls -->
+    <div x-show="!['data','home','tasks','audit'].includes(rightPanel)" class="absolute top-2 right-2 z-20 flex gap-1">
+      <button @click="$refs.rightIframe.src = appUrl(rightPanel) + '?t=' + Date.now()"
+        class="bg-surface/80 border border-border rounded p-1.5 text-muted hover:text-accent hover:border-accent cursor-pointer backdrop-blur-sm"
+        title="refresh app">
+        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+      </button>
+      <button @click="window.open(appUrl(rightPanel), '_blank')"
+        class="bg-surface/80 border border-border rounded p-1.5 text-muted hover:text-accent hover:border-accent cursor-pointer backdrop-blur-sm"
+        title="open in new window">
+        <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
     <!-- app iframe -->
     <iframe x-show="!['data','home','tasks','audit'].includes(rightPanel)" x-ref="rightIframe" class="w-full h-full border-none"
       :src="token && !['data','home','tasks','audit'].includes(rightPanel) ? appUrl(rightPanel) : 'about:blank'"></iframe>
@@ -1035,7 +1043,7 @@ function dashboard() {
             this.messages.push({ role: 'user', content: msg.content });
             if (msg.result) {
               this.messages.push({
-                role: msg.status === 'error' ? 'system' : 'assistant',
+                role: msg.status === 'error' ? 'error' : 'assistant',
                 content: msg.result,
               });
             }
@@ -1045,12 +1053,20 @@ function dashboard() {
         this.setStatus(session.status === 'active' ? 'active' : session.status, session.status);
         this.scrollToBottom();
 
-        // connect websocket if active
+        // if last message errored, auto-close the session
         if (session.status === 'active') {
-          this.connectWS(id);
-          // check if last message is already complete (not waiting on claude)
           const lastMsg = session.messages?.[session.messages.length - 1];
-          if (!lastMsg || lastMsg.status === 'complete' || lastMsg.status === 'error') {
+          if (lastMsg?.status === 'error') {
+            this.messages.push({ role: 'error', content: 'sorry, this session had an issue and has been closed automatically.' });
+            try { await this.authFetch(`/claude/sessions/${id}/end`, { method: 'POST' }); } catch {}
+            this.sessionStatus = 'ended';
+            this.currentWorktree = null;
+            this.isRunning = false;
+            this.setStatus('ready', 'closed');
+            this.loadSessions();
+          } else if (lastMsg?.status === 'running') {
+            this.connectWS(id);
+          } else {
             this.isRunning = false;
           }
         }
@@ -1268,6 +1284,9 @@ function dashboard() {
 
     connectWS(sessionId) {
       if (this.ws) { this.ws.close(); this.ws = null; }
+      if (this._wsPing) { clearInterval(this._wsPing); this._wsPing = null; }
+      this._wsSessionId = sessionId;
+      this._wsRetries = 0;
 
       const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${wsProto}//${location.host}/claude/ws/${sessionId}?token=${encodeURIComponent(this.token)}`;
@@ -1278,10 +1297,17 @@ function dashboard() {
 
       this.ws.onopen = () => {
         console.log('[ws] connected');
+        this._wsRetries = 0;
         this.setStatus('running', 'connected');
+        // keepalive ping every 25s to prevent proxy/idle timeouts
+        this._wsPing = setInterval(() => {
+          if (this.ws?.readyState === WebSocket.OPEN) this.ws.send('ping');
+        }, 25000);
       };
 
       this.ws.onmessage = (e) => {
+        if (e.data === 'pong') return; // keepalive response
+
         const data = JSON.parse(e.data);
 
         if (data.type === 'text') {
@@ -1333,7 +1359,21 @@ function dashboard() {
 
       this.ws.onclose = () => {
         console.log('[ws] disconnected');
-        if (this.isRunning) this.setStatus('error', 'disconnected');
+        if (this._wsPing) { clearInterval(this._wsPing); this._wsPing = null; }
+        // auto-reconnect if we still have an active session
+        if (this.currentSessionId === sessionId && this.sessionStatus === 'active') {
+          this._wsRetries++;
+          const delay = Math.min(1000 * Math.pow(2, this._wsRetries - 1), 15000);
+          console.log(`[ws] reconnecting in ${delay}ms (attempt ${this._wsRetries})`);
+          this.setStatus('running', 'reconnecting...');
+          setTimeout(() => {
+            if (this.currentSessionId === sessionId && this.sessionStatus === 'active') {
+              this.connectWS(sessionId);
+            }
+          }, delay);
+        } else if (this.isRunning) {
+          this.setStatus('error', 'disconnected');
+        }
       };
     },
 

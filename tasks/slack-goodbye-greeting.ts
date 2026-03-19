@@ -1,4 +1,4 @@
-// @cron 0 13 * * *
+// @cron 0 13,19 * * *
 // @description greet the current user on Slack with a random goodbye phrase
 
 import { sql } from "../lib/db";

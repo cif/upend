@@ -253,7 +253,24 @@ app.post("/api/tasks/:name/run", requireAuth, async (c) => {
 
 // ---------- /apps/* (file serving, with auth) ----------
 
-app.get("/apps/*", requireAuth, async (c) => {
+app.get("/apps/*", async (c) => {
+  // check auth — redirect to login instead of JSON 401
+  const header = c.req.header("Authorization");
+  const cookieHeader = c.req.header("Cookie") || "";
+  const cookieToken = cookieHeader.match(/upend_token=([^;]+)/)?.[1];
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : cookieToken;
+
+  if (!token) {
+    return c.redirect(`/?next=${encodeURIComponent(c.req.path)}`);
+  }
+
+  try {
+    const { verifyToken } = await import("../../lib/auth");
+    await verifyToken(token);
+  } catch {
+    return c.redirect(`/?next=${encodeURIComponent(c.req.path)}`);
+  }
+
   const root = resolveRoot(c);
   const path = c.req.path.replace("/apps/", "");
   for (const base of [join(root, "apps"), join(PROJECT_ROOT, "apps")]) {

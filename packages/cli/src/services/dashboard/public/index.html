@@ -671,6 +671,10 @@ function dashboard() {
         document.cookie = `upend_token=${this.token}; path=/; SameSite=Lax; max-age=86400`;
         this.loadApps();
         this.loadTables();
+        // redirect back to original page if came from ?next=
+        const params = new URLSearchParams(window.location.search);
+        const next = params.get('next');
+        if (next) { window.location.href = next; return; }
         // restore session from URL after login
         const path = window.location.pathname;
         const sessionMatch = path.match(/^\/session\/(.+)/);

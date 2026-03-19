@@ -359,6 +359,103 @@ app.get("/*", async (c) => {
   return c.json({ error: "not found" }, 404);
 });
 
+// ---------- cron scheduler ----------
+
+function parseCronField(field: string, min: number, max: number): number[] {
+  const values: number[] = [];
+  for (const part of field.split(",")) {
+    const stepMatch = part.match(/^(.+)\/(\d+)$/);
+    const step = stepMatch ? Number(stepMatch[2]) : 1;
+    const range = stepMatch ? stepMatch[1] : part;
+
+    if (range === "*") {
+      for (let i = min; i <= max; i += step) values.push(i);
+    } else if (range.includes("-")) {
+      const [a, b] = range.split("-").map(Number);
+      for (let i = a; i <= b; i += step) values.push(i);
+    } else {
+      values.push(Number(range));
+    }
+  }
+  return values;
+}
+
+function cronMatches(expr: string, date: Date): boolean {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length < 5) return false;
+  const [minF, hourF, domF, monF, dowF] = parts;
+  const checks: [string, number, number, number][] = [
+    [minF, date.getUTCMinutes(), 0, 59],
+    [hourF, date.getUTCHours(), 0, 23],
+    [domF, date.getUTCDate(), 1, 31],
+    [monF, date.getUTCMonth() + 1, 1, 12],
+    [dowF, date.getUTCDay(), 0, 7],
+  ];
+  return checks.every(([field, val, min, max]) =>
+    parseCronField(field, min, max).includes(val)
+  );
+}
+
+function loadCronTasks(): { name: string; cron: string; filePath: string }[] {
+  const tasksDir = join(PROJECT_ROOT, "tasks");
+  try {
+    return readdirSync(tasksDir)
+      .filter(f => f.endsWith(".ts") || f.endsWith(".js"))
+      .map(file => {
+        const content = readFileSync(join(tasksDir, file), "utf-8");
+        const cronMatch = content.match(/\/\/\s*@cron\s+(.+)/);
+        return cronMatch
+          ? { name: file.replace(/\.(ts|js)$/, ""), cron: cronMatch[1].trim(), filePath: join(tasksDir, file) }
+          : null;
+      })
+      .filter(Boolean) as { name: string; cron: string; filePath: string }[];
+  } catch {
+    return [];
+  }
+}
+
+const cronLastRun = new Map<string, string>();
+
+function startCronScheduler() {
+  let tasks = loadCronTasks();
+  console.log(`[cron] loaded ${tasks.length} scheduled task(s): ${tasks.map(t => t.name).join(", ") || "none"}`);
+
+  // reload task list every 5 minutes to pick up new/changed tasks
+  setInterval(() => {
+    tasks = loadCronTasks();
+  }, 5 * 60_000);
+
+  setInterval(() => {
+    const now = new Date();
+    // key by minute so we only run once per matching minute
+    const minuteKey = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}-${now.getUTCMinutes()}`;
+
+    for (const task of tasks) {
+      if (!cronMatches(task.cron, now)) continue;
+      const runKey = `${task.name}:${minuteKey}`;
+      if (cronLastRun.has(runKey)) continue;
+      cronLastRun.set(runKey, new Date().toISOString());
+
+      console.log(`[cron] running ${task.name} (schedule: ${task.cron})`);
+      const proc = Bun.spawn(["bun", task.filePath], { cwd: PROJECT_ROOT, env: { ...process.env }, stdout: "pipe", stderr: "pipe" });
+      proc.exited.then(async (exitCode) => {
+        const stdout = await new Response(proc.stdout).text();
+        const stderr = await new Response(proc.stderr).text();
+        console.log(`[cron] ${task.name} exit=${exitCode}${stderr ? ` stderr=${stderr.slice(0, 200)}` : ""}`);
+        await audit("task.cron", { targetType: "task", targetId: task.name, detail: { exitCode, stdout: stdout.slice(0, 500), cron: task.cron } });
+      });
+
+      // keep map from growing forever — prune old entries
+      if (cronLastRun.size > 1000) {
+        const keys = [...cronLastRun.keys()];
+        for (let i = 0; i < keys.length - 100; i++) cronLastRun.delete(keys[i]);
+      }
+    }
+  }, 30_000);
+}
+
+startCronScheduler();
+
 const port = Number(process.env.API_PORT) || 3001;
 console.log(`[api] running on :${port}`);
 

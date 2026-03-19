@@ -3,6 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <title>things</title>
+  <script>(function(){function a(d){document.documentElement.classList.toggle('light',!d)}var p=new URLSearchParams(location.search),t=p.get('upend_theme'),d=t?t!=='light':matchMedia('(prefers-color-scheme: dark)').matches;a(d);window.addEventListener('message',function(e){if(e.data&&e.data.type==='upend_theme')a(e.data.darkMode)})})();</script>
+  <style>
+    html.light body { background: #f5f5f5; color: #1f2937; }
+    html.light input, html.light textarea, html.light select { background: #fff; border-color: #d1d5db; color: #1f2937; }
+    html.light th { color: #9ca3af; border-bottom-color: #e5e7eb; }
+    html.light td { border-bottom-color: #f3f4f6; }
+    html.light tr:hover td { background: #f9fafb; }
+    html.light .sku { color: #9ca3af; }
+    html.light .unshipped-badge { background: #f3f4f6; color: #9ca3af; }
+    html.light .loading { color: #9ca3af; }
+    html.light #modal-overlay { background: rgba(0,0,0,0.4); }
+    html.light #modal { background: #fff; border-color: #e5e7eb; }
+    html.light #modal label { color: #6b7280; }
+    html.light button.danger { border-color: #e5e7eb; }
+  </style>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0a0a0a; color: #e5e5e5; font-family: monospace; min-height: 100vh; }

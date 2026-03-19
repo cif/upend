@@ -3,6 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <title>sarah</title>
+  <script>(function(){function a(d){document.documentElement.classList.toggle('light',!d)}var p=new URLSearchParams(location.search),t=p.get('upend_theme'),d=t?t!=='light':matchMedia('(prefers-color-scheme: dark)').matches;a(d);window.addEventListener('message',function(e){if(e.data&&e.data.type==='upend_theme')a(e.data.darkMode)})})();</script>
+  <style>
+    html.light body { background: #f5f5f5; color: #1f2937; }
+    html.light th { color: #9ca3af; border-bottom-color: #e5e7eb; }
+    html.light td { border-bottom-color: #f3f4f6; }
+    html.light .pending { color: #9ca3af; }
+    html.light .empty { color: #9ca3af; }
+  </style>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {

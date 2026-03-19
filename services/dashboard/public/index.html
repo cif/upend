@@ -441,7 +441,7 @@
           <div class="flex items-center justify-between mb-1">
             <div class="flex items-center gap-2">
               <span class="text-sm font-mono text-gray-200" x-text="wf.name"></span>
-              <span x-show="wf.cron" class="text-[10px] text-muted bg-border px-1.5 py-0.5 rounded font-mono" x-text="wf.cron"></span>
+              <span x-show="wf.cron" class="text-[10px] text-muted bg-border px-1.5 py-0.5 rounded font-mono" x-text="cronToHuman(wf.cron) + ' (' + wf.cron + ')'"></span>
             </div>
             <div class="flex items-center gap-2">
               <span x-show="wf._running" class="text-xs text-accent animate-pulse">running...</span>
@@ -816,12 +816,11 @@ function dashboard() {
         }
       }
 
-      // sync URL when panel changes
+      // sync URL when panel changes (always, even during sessions)
       this.$watch('rightPanel', (panel) => {
-        if (this.currentSessionId) return; // session URL takes priority
         const builtins = { home: '/', data: '/data', tasks: '/tasks', audit: '/audit' };
         const url = builtins[panel] || `/app/${panel}`;
-        if (window.location.pathname !== url) history.pushState(null, '', url);
+        if (window.location.pathname !== url) history.replaceState(null, '', url);
       });
 
       // sync URL when selected table changes
@@ -831,15 +830,13 @@ function dashboard() {
         if (window.location.pathname !== url) history.replaceState(null, '', url);
       });
 
-      // update URL when session changes
+      // set session URL when entering a session
       this.$watch('currentSessionId', (id) => {
         if (id) {
           const s = this.sessions.find(s => s.id == id);
           const ctx = typeof s?.context === 'string' ? JSON.parse(s.context) : s?.context;
           const name = ctx?.worktree || s?.snapshotName;
           if (name) history.replaceState(null, '', `/session/${name}`);
-        } else if (this.rightPanel === 'home') {
-          history.replaceState(null, '', '/');
         }
       });
 
@@ -1671,6 +1668,49 @@ function dashboard() {
     },
 
     // ---------- helpers ----------
+
+    cronToHuman(expr) {
+      if (!expr) return '';
+      const [min, hour, dom, mon, dow] = expr.trim().split(/\s+/);
+      const parts = [];
+
+      // dow
+      const days = { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat', '7': 'Sun' };
+      if (dow !== '*') {
+        const dowList = dow.split(',').map(d => days[d] || d).join(', ');
+        parts.push(dowList);
+      }
+
+      // frequency from hour/min patterns
+      if (hour === '*' && min === '*') {
+        parts.push('every minute');
+      } else if (hour === '*') {
+        parts.push(`every hour at :${min.padStart(2, '0')}`);
+      } else if (hour.includes('/')) {
+        const step = hour.split('/')[1];
+        parts.push(`every ${step}h`);
+        if (min !== '0' && min !== '00') parts.push(`at :${min.padStart(2, '0')}`);
+      } else if (hour.includes(',')) {
+        const times = hour.split(',').map(h => `${h}:${min.padStart(2, '0')}`).join(', ');
+        parts.push(`at ${times} UTC`);
+      } else if (min.includes('/')) {
+        const step = min.split('/')[1];
+        parts.push(`every ${step}min`);
+        if (hour !== '*') parts.push(`during hour ${hour}`);
+      } else {
+        parts.push(`at ${hour}:${min.padStart(2, '0')} UTC`);
+      }
+
+      // dom
+      if (dom !== '*') parts.push(`on day ${dom}`);
+      // mon
+      if (mon !== '*') {
+        const months = { '1':'Jan','2':'Feb','3':'Mar','4':'Apr','5':'May','6':'Jun','7':'Jul','8':'Aug','9':'Sep','10':'Oct','11':'Nov','12':'Dec' };
+        parts.push(`in ${mon.split(',').map(m => months[m] || m).join(', ')}`);
+      }
+
+      return parts.join(' ');
+    },
 
     setStatus(s, text) {
       this.status = s;

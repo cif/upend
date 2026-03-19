@@ -191,15 +191,22 @@
 
 <!-- new session modal -->
 <div x-show="showSessionModal" x-transition class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-  <form @submit.prevent="showSessionModal = false; createSession(_pendingPrompt, sessionTitle)"
-    @keydown.escape="showSessionModal = false; messages.pop()"
+  <form @submit.prevent="startNewSession()"
+    @keydown.escape="showSessionModal = false"
     class="bg-surface border border-border rounded-xl p-6 w-96 flex flex-col gap-4">
     <h3 class="text-accent font-bold text-sm">new session</h3>
-    <p class="text-muted text-xs">what are you working on?</p>
-    <input x-model="sessionTitle" x-ref="sessionTitleInput" type="text" placeholder="e.g. add products table and CRUD app"
-      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+    <div>
+      <label class="text-muted text-xs block mb-1">title</label>
+      <input x-model="sessionTitle" x-ref="sessionTitleInput" type="text" placeholder="e.g. add products table and CRUD app"
+        class="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+    </div>
+    <div>
+      <label class="text-muted text-xs block mb-1">task <span class="text-muted/50">(optional — sends immediately)</span></label>
+      <textarea x-model="_pendingPrompt" rows="3" placeholder="tell claude what to build..."
+        class="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent resize-none"></textarea>
+    </div>
     <div class="flex gap-2 justify-end">
-      <button type="button" @click="showSessionModal = false; messages.pop()"
+      <button type="button" @click="showSessionModal = false"
         class="text-muted text-xs px-3 py-1.5 rounded border border-border cursor-pointer hover:text-gray-200 font-mono">cancel</button>
       <button type="submit" :disabled="!sessionTitle.trim()"
         class="bg-accent text-black text-xs px-4 py-1.5 rounded font-bold cursor-pointer disabled:opacity-40 font-mono">start session</button>
@@ -269,7 +276,7 @@
 <!-- main panels -->
 <div x-show="token" class="flex-1 flex min-h-0">
   <!-- left: chat (native DOM) -->
-  <div class="flex-1 flex flex-col min-h-0 min-w-0" id="panel-left">
+  <div class="flex flex-col min-h-0 min-w-0" id="panel-left" style="flex: 0 0 420px; max-width: 520px;">
     <!-- messages -->
     <div class="flex-1 overflow-y-auto px-5 py-4 space-y-4 no-scrollbar" x-ref="messages">
       <template x-for="(msg, i) in messages" :key="i">
@@ -293,13 +300,18 @@
           </template>
         </div>
       </template>
+      <!-- working indicator -->
+      <div x-show="isRunning" class="max-w-3xl mx-auto flex items-center gap-2 py-1">
+        <span class="w-2 h-2 rounded-full bg-accent dot-pulse"></span>
+        <span class="text-xs text-muted font-mono" x-text="statusText || 'working...'"></span>
+      </div>
       <div x-show="messages.length === 0" class="max-w-3xl mx-auto">
         <div class="text-xs font-bold uppercase tracking-wide mb-1 text-muted">system</div>
         <div class="text-sm text-muted">start a new session or tell claude what to build.</div>
       </div>
     </div>
-    <!-- input -->
-    <div class="border-t border-border px-5 py-3 shrink-0">
+    <!-- input (active session) -->
+    <div x-show="currentSessionId" class="border-t border-border px-5 py-3 shrink-0">
       <form @submit.prevent="sendPrompt()" class="max-w-3xl mx-auto flex gap-2">
         <textarea x-model="prompt" x-ref="chatInput" rows="1" placeholder="tell claude what to do..."
           @keydown.enter.prevent="if(!$event.shiftKey) sendPrompt()"
@@ -320,6 +332,13 @@
             <button @click="attachments.splice(i, 1)" class="text-muted hover:text-red-400 cursor-pointer">&times;</button>
           </div>
         </template>
+      </div>
+    </div>
+    <!-- no active session -->
+    <div x-show="!currentSessionId" class="border-t border-border px-5 py-4 shrink-0">
+      <div class="max-w-3xl mx-auto flex items-center justify-between">
+        <span class="text-muted text-sm font-mono" x-text="messages.length ? 'session closed' : 'no active session'"></span>
+        <button @click="newSession()" class="bg-accent text-black text-xs px-4 py-1.5 rounded font-bold cursor-pointer font-mono">+ new session</button>
       </div>
     </div>
   </div>
@@ -504,39 +523,92 @@
             </div>
 
             <!-- DATA sub-tab -->
-            <div x-show="dataSubTab === 'data'" class="flex-1 overflow-y-auto">
+            <div x-show="dataSubTab === 'data'" class="flex-1 overflow-y-auto flex flex-col">
               <!-- view-as banner -->
               <div x-show="viewAsUserId" class="px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/30 flex items-center gap-2">
                 <span class="text-yellow-400 text-xs font-mono">viewing as <span x-text="viewAsLabel"></span></span>
                 <span x-show="viewAsDenied" class="text-red-400 text-xs">&mdash; access denied by RLS</span>
               </div>
-              <div x-show="sampleRows.length === 0 && !viewAsDenied" class="p-8 text-center text-muted text-xs">
+              <div x-show="sampleRows.length === 0 && !addingRow && !viewAsDenied" class="p-8 text-center text-muted text-xs">
                 no rows
               </div>
-              <div x-show="sampleRows.length > 0" class="overflow-x-auto">
-                <table class="w-full text-xs">
+              <div class="flex-1 overflow-x-auto">
+                <table x-show="sampleRows.length > 0 || addingRow" class="w-full text-xs">
                   <thead>
-                    <tr class="border-b border-border text-muted sticky top-0 bg-surface">
+                    <tr class="border-b border-border text-muted sticky top-0 bg-surface z-10">
+                      <th class="w-8 px-2 py-2"></th>
                       <template x-for="key in sampleRowKeys" :key="key">
                         <th class="text-left px-3 py-2 font-normal font-mono whitespace-nowrap" x-text="key"></th>
                       </template>
                     </tr>
                   </thead>
                   <tbody>
-                    <template x-for="(row, i) in sampleRows" :key="i">
-                      <tr class="border-b border-border/50 hover:bg-surface">
+                    <!-- existing rows -->
+                    <template x-for="(row, i) in sampleRows" :key="row.id ?? i">
+                      <tr class="border-b border-border/50 hover:bg-surface group">
+                        <!-- delete button -->
+                        <td class="px-2 py-2 text-center">
+                          <template x-if="deleteConfirmIdx !== i">
+                            <button @click="deleteConfirmIdx = i"
+                              class="text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 cursor-pointer text-xs" title="delete row">&times;</button>
+                          </template>
+                          <template x-if="deleteConfirmIdx === i">
+                            <div class="flex gap-1">
+                              <button @click="deleteRow(i)" class="text-red-400 hover:text-red-300 cursor-pointer text-[10px] font-bold">del</button>
+                              <button @click="deleteConfirmIdx = null" class="text-muted hover:text-gray-200 cursor-pointer text-[10px]">no</button>
+                            </div>
+                          </template>
+                        </td>
+                        <!-- data cells -->
                         <template x-for="key in sampleRowKeys" :key="key">
-                          <td class="px-3 py-2 text-gray-200 font-mono whitespace-nowrap max-w-[200px] truncate"
-                            x-text="typeof row[key] === 'object' ? JSON.stringify(row[key]) : row[key]"></td>
+                          <td class="px-3 py-2 font-mono whitespace-nowrap max-w-[200px] truncate text-gray-200 cursor-pointer hover:bg-accent-dim relative"
+                            @click="startEdit(i, key)">
+                            <span x-text="typeof row[key] === 'object' ? JSON.stringify(row[key]) : (row[key] ?? '—')"
+                              :class="editingCell?.rowIdx === i && editingCell?.key === key ? 'invisible' : ''"></span>
+                            <template x-if="editingCell?.rowIdx === i && editingCell?.key === key">
+                              <input type="text" x-model="editingValue"
+                                @keydown.enter="saveCell()" @keydown.escape="editingCell = null"
+                                @blur="saveCell()"
+                                x-init="$nextTick(() => $el.focus())"
+                                class="absolute inset-0 bg-bg border border-accent px-3 py-2 text-gray-200 outline-none font-mono text-xs"
+                                :disabled="savingCell">
+                            </template>
+                          </td>
+                        </template>
+                      </tr>
+                    </template>
+                    <!-- new row form -->
+                    <template x-if="addingRow">
+                      <tr class="border-b border-accent/30 bg-accent-dim/30">
+                        <td class="px-2 py-2 text-center">
+                          <button @click="addingRow = false; newRowData = {}" class="text-muted hover:text-gray-200 cursor-pointer text-xs">&times;</button>
+                        </td>
+                        <template x-for="key in sampleRowKeys" :key="key">
+                          <td class="px-3 py-2">
+                            <template x-if="editableColumns.includes(key)">
+                              <input type="text" x-model="newRowData[key]" :placeholder="key"
+                                @keydown.enter="insertRow()"
+                                class="w-full bg-bg border border-border rounded px-1 py-0.5 text-gray-200 outline-none font-mono text-xs focus:border-accent min-w-[80px]">
+                            </template>
+                            <template x-if="!editableColumns.includes(key)">
+                              <span class="text-muted text-xs italic">auto</span>
+                            </template>
+                          </td>
                         </template>
                       </tr>
                     </template>
                   </tbody>
                 </table>
               </div>
-              <div x-show="sampleRows.length > 0" class="px-4 py-2 border-t border-border text-xs text-muted">
-                showing <span x-text="sampleRows.length"></span> rows
-                <span x-show="viewAsUserId" class="text-yellow-400/60">(as <span x-text="viewAsLabel"></span>)</span>
+              <div class="px-4 py-2 border-t border-border text-xs text-muted flex items-center justify-between">
+                <span>
+                  <span x-text="sampleRows.length"></span> rows
+                  <span x-show="viewAsUserId" class="text-yellow-400/60">(as <span x-text="viewAsLabel"></span>)</span>
+                </span>
+                <button x-show="!addingRow" @click="startAddRow()"
+                  class="text-accent hover:text-orange-300 cursor-pointer font-mono">+ add row</button>
+                <button x-show="addingRow" @click="insertRow()"
+                  class="text-accent hover:text-orange-300 cursor-pointer font-mono">save row</button>
               </div>
             </div>
 
@@ -651,6 +723,12 @@ function dashboard() {
     tableColumns: [],
     sampleRows: [],
     sampleRowKeys: [],
+    editingCell: null, // { rowIdx, key }
+    editingValue: '',
+    savingCell: false,
+    addingRow: false,
+    newRowData: {},
+    deleteConfirmIdx: null,
     tablePolicies: [],
     tableRLSEnabled: false,
     allPolicies: [],
@@ -671,8 +749,10 @@ function dashboard() {
     impersonating: !!localStorage.getItem('upend_real_token'),
     impersonatingEmail: '',
 
-    // theme
-    darkMode: localStorage.getItem('upend_theme') !== 'light',
+    // theme — follow system default, sessionStorage override survives refresh but not tab close
+    darkMode: sessionStorage.getItem('upend_theme')
+      ? sessionStorage.getItem('upend_theme') === 'dark'
+      : !window.matchMedia('(prefers-color-scheme: light)').matches,
 
     // resizer state
     _resizing: false,
@@ -815,7 +895,7 @@ function dashboard() {
 
     toggleTheme() {
       this.darkMode = !this.darkMode;
-      localStorage.setItem('upend_theme', this.darkMode ? 'dark' : 'light');
+      sessionStorage.setItem('upend_theme', this.darkMode ? 'dark' : 'light');
       this.applyTheme();
     },
 
@@ -974,11 +1054,24 @@ function dashboard() {
     newSession() {
       this.currentSessionId = null;
       this.currentWorktree = null;
-            this.messages = [];
+      this.messages = [];
       this.drawerOpen = false;
       if (this.ws) { this.ws.close(); this.ws = null; }
       this.setStatus('ready', 'ready');
-      this.$nextTick(() => this.$refs.chatInput?.focus());
+      this.sessionTitle = '';
+      this._pendingPrompt = '';
+      this.showSessionModal = true;
+      this.$nextTick(() => this.$refs.sessionTitleInput?.focus());
+    },
+
+    async startNewSession() {
+      this.showSessionModal = false;
+      const task = this._pendingPrompt.trim();
+      if (task) {
+        this.messages.push({ role: 'user', content: task });
+        this.scrollToBottom();
+      }
+      await this.createSession(task, this.sessionTitle);
     },
 
     async closeSession() {
@@ -1116,13 +1209,12 @@ function dashboard() {
 
       if (!this.currentSessionId) {
         this._pendingPrompt = text;
-        this.showSessionModal = true;
         this.sessionTitle = '';
+        this.showSessionModal = true;
         this.$nextTick(() => this.$refs.sessionTitleInput?.focus());
         return;
-      } else {
-        await this.sendMessage(text);
       }
+      await this.sendMessage(text);
     },
 
     async createSession(text, title) {
@@ -1255,6 +1347,10 @@ function dashboard() {
       this.tableColumns = [];
       this.sampleRows = [];
       this.sampleRowKeys = [];
+      this.editingCell = null;
+      this.addingRow = false;
+      this.newRowData = {};
+      this.deleteConfirmIdx = null;
       this.viewAsDenied = false;
       this.tablePolicies = this.allPolicies.filter(p => p.table === name);
       this.tableRLSEnabled = this.allRLSTables.includes(name);
@@ -1333,6 +1429,105 @@ function dashboard() {
 
     refreshDataTab() {
       if (this.selectedTable) this.fetchDataRows();
+    },
+
+    // columns that can be edited (exclude auto-generated ones)
+    get editableColumns() {
+      return this.tableColumns
+        .filter(c => !c.columnDefault?.startsWith('gen_random') && !c.columnDefault?.startsWith('now()') && c.columnName !== 'id')
+        .map(c => c.columnName);
+    },
+
+    // primary key column for this table (used for PATCH/DELETE filters)
+    get pkColumn() {
+      const col = this.tableColumns.find(c => c.columnDefault?.includes('gen_random') || c.columnName === 'id');
+      return col?.columnName || this.sampleRowKeys[0];
+    },
+
+    startEdit(rowIdx, key) {
+      if (this.viewAsUserId) return; // no editing while impersonating
+      // don't allow editing the PK
+      if (key === this.pkColumn) return;
+      const val = this.sampleRows[rowIdx][key];
+      this.editingValue = typeof val === 'object' ? JSON.stringify(val) : (val ?? '');
+      this.editingCell = { rowIdx, key };
+    },
+
+    async saveCell() {
+      if (!this.editingCell || this.savingCell) return;
+      const { rowIdx, key } = this.editingCell;
+      const row = this.sampleRows[rowIdx];
+      const oldVal = typeof row[key] === 'object' ? JSON.stringify(row[key]) : String(row[key] ?? '');
+      if (this.editingValue === oldVal) { this.editingCell = null; return; }
+
+      this.savingCell = true;
+      const pk = this.pkColumn;
+      const pkVal = row[pk];
+      try {
+        const res = await this.authFetch(`/api/data/${this.selectedTable}?${pk}=eq.${pkVal}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ [key]: this.editingValue || null }),
+        });
+        if (res?.ok) {
+          const updated = await res.json();
+          if (updated.length) this.sampleRows[rowIdx] = updated[0];
+        }
+      } catch (err) {
+        console.error('[saveCell]', err);
+      }
+      this.savingCell = false;
+      this.editingCell = null;
+    },
+
+    async deleteRow(idx) {
+      const row = this.sampleRows[idx];
+      const pk = this.pkColumn;
+      const pkVal = row[pk];
+      try {
+        const res = await this.authFetch(`/api/data/${this.selectedTable}?${pk}=eq.${pkVal}`, {
+          method: 'DELETE',
+        });
+        if (res?.ok) {
+          this.sampleRows.splice(idx, 1);
+        }
+      } catch (err) {
+        console.error('[deleteRow]', err);
+      }
+      this.deleteConfirmIdx = null;
+    },
+
+    startAddRow() {
+      this.newRowData = {};
+      this.editableColumns.forEach(k => this.newRowData[k] = '');
+      // if no rows yet, populate sampleRowKeys from tableColumns
+      if (this.sampleRowKeys.length === 0) {
+        this.sampleRowKeys = this.tableColumns.map(c => c.columnName);
+      }
+      this.addingRow = true;
+    },
+
+    async insertRow() {
+      // filter out empty values
+      const body = {};
+      for (const [k, v] of Object.entries(this.newRowData)) {
+        if (v !== '') body[k] = v;
+      }
+      if (Object.keys(body).length === 0) return;
+      try {
+        const res = await this.authFetch(`/api/data/${this.selectedTable}`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+        if (res?.ok) {
+          const row = await res.json();
+          this.sampleRows.unshift(row);
+          if (this.sampleRowKeys.length === 0) this.sampleRowKeys = Object.keys(row);
+          this.addingRow = false;
+          this.newRowData = {};
+        }
+      } catch (err) {
+        console.error('[insertRow]', err);
+      }
     },
 
     async uploadCSV(event) {
@@ -1462,9 +1657,10 @@ function dashboard() {
       const panels = document.querySelector('.flex-1.flex.min-h-0');
       if (!panels) return;
       const rect = panels.getBoundingClientRect();
-      const pct = Math.max(20, Math.min(80, ((e.clientX - rect.left) / rect.width) * 100));
-      document.getElementById('panel-left').style.flex = `0 0 ${pct}%`;
-      document.getElementById('panel-right').style.flex = `0 0 ${100 - pct}%`;
+      const width = Math.max(280, Math.min(rect.width * 0.8, e.clientX - rect.left));
+      const left = document.getElementById('panel-left');
+      left.style.flex = `0 0 ${width}px`;
+      left.style.maxWidth = 'none';
     },
 
     stopResize() {

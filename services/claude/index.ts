@@ -234,6 +234,10 @@ app.post("/sessions/:id/commit", async (c) => {
     // mark session as committed
     await sql`UPDATE upend.editing_sessions SET status = 'committed' WHERE id = ${id}`;
 
+    // audit log
+    await sql`INSERT INTO audit.log (actor_id, actor_email, action, target_type, target_id, detail)
+      VALUES (${user.sub}, ${user.email}, ${'session.publish'}, ${'session'}, ${id}, ${JSON.stringify({ session: ctx.worktree, prompt: session.prompt })})`;
+
     // restart live services so changes take effect
     restartServices();
 
@@ -405,12 +409,11 @@ async function runMessage(
 
 function restartServices() {
   console.log("[restart] restarting non-claude services...");
-  const cliRoot = new URL("../../../", import.meta.url).pathname;
   Bun.spawn(["bash", "-c", `
-    pkill -f "gateway/index.ts" 2>/dev/null || true
+    pkill -f "bun.*services/api/index.ts" 2>/dev/null || true
     sleep 1
     cd ${PROJECT_ROOT}
-    nohup bun --watch ${cliRoot}/src/services/gateway/index.ts > /tmp/upend-api.log 2>&1 &
+    nohup bun services/api/index.ts > /tmp/upend-api.log 2>&1 &
     echo "api restarted"
   `], {
     env: { ...process.env, API_PORT: "3001", UPEND_PROJECT: PROJECT_ROOT },

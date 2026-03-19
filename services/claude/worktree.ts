@@ -81,36 +81,46 @@ export async function checkMergeable(name: string): Promise<{ mergeable: boolean
   await gitIn(worktreePath, "add", "-A", "--", ".", ":!.env", ":!.env.keys", ":!.keys");
   await gitIn(worktreePath, "commit", "-m", `auto-commit before merge check`, "--allow-empty");
 
-  // make sure main working tree is clean before attempting merge
-  const status = await git("status", "--porcelain");
-  if (status.stdout) {
-    // stash any uncommitted changes on main so the merge check can proceed
-    await git("stash", "push", "--include-untracked", "-m", "merge-check-stash");
-    var stashed = true;
-  }
-
-  // try a dry-run merge
-  const result = await git("merge", "--no-commit", "--no-ff", branch);
-
-  if (result.exitCode === 0) {
-    // clean merge — abort it (we were just checking)
-    await git("merge", "--abort");
-    if (stashed!) await git("stash", "pop");
+  // find the fork point — where this session branched from main
+  const baseResult = await git("merge-base", "HEAD", branch);
+  if (baseResult.exitCode !== 0) {
+    // unrelated histories — find files the session actually changed vs its own root
+    // and check if any of those files also differ on main
+    const sessionFiles = await gitIn(worktreePath, "diff", "--name-only", "--diff-filter=ACMR", "--no-renames", "HEAD~1");
+    if (!sessionFiles.stdout.trim()) {
+      return { mergeable: true, conflicts: [] };
+    }
+    // for each file the session touched, check if main has a different version
+    const conflicts: string[] = [];
+    for (const file of sessionFiles.stdout.trim().split("\n")) {
+      const mainVersion = await git("show", `HEAD:${file}`);
+      const sessionVersion = await git("show", `${branch}:${file}`);
+      if (mainVersion.exitCode === 0 && sessionVersion.exitCode === 0 && mainVersion.stdout !== sessionVersion.stdout) {
+        conflicts.push(file);
+      }
+    }
+    if (conflicts.length > 0) {
+      return { mergeable: false, conflicts };
+    }
     return { mergeable: true, conflicts: [] };
   }
 
-  // get conflict list
-  const conflictResult = await git("diff", "--name-only", "--diff-filter=U");
-  const conflicts = conflictResult.stdout.split("\n").filter(Boolean);
+  // normal case: related histories — use merge-tree (doesn't touch working tree)
+  const result = await git("merge-tree", "--write-tree", "HEAD", branch);
 
-  // abort the failed merge
-  await git("merge", "--abort");
-  if (stashed!) await git("stash", "pop");
+  if (result.exitCode === 0) {
+    return { mergeable: true, conflicts: [] };
+  }
 
-  // if no file conflicts detected, include the merge error message
-  const error = conflicts.length === 0 ? (result.stderr || result.stdout || "merge failed for unknown reason") : undefined;
+  const conflicts = result.stdout.split("\n")
+    .filter(line => /^\d{6} /.test(line))
+    .map(line => line.replace(/^\d{6} [a-f0-9]+ \d\t/, ""))
+    .filter(Boolean);
+  const uniqueConflicts = [...new Set(conflicts)];
 
-  return { mergeable: false, conflicts, error };
+  const error = uniqueConflicts.length === 0 ? (result.stderr || result.stdout || "merge failed for unknown reason") : undefined;
+
+  return { mergeable: false, conflicts: uniqueConflicts, error };
 }
 
 // merge a session into live (main branch)
@@ -122,27 +132,23 @@ export async function mergeToLive(name: string, user: string): Promise<{ success
   await gitIn(worktreePath, "add", "-A", "--", ".", ":!.env", ":!.env.keys", ":!.keys");
   await gitIn(worktreePath, "commit", "-m", `session ${name}: final changes`, "--allow-empty");
 
-  // stash any uncommitted/untracked changes on main so the merge can proceed
+  // commit any uncommitted changes on main so git merge can proceed
+  // (stashing would modify the working tree and kill the running service)
   const status = await git("status", "--porcelain");
-  let stashed = false;
   if (status.stdout) {
-    await git("stash", "push", "--include-untracked", "-m", "merge-live-stash");
-    stashed = true;
+    await git("add", "-A");
+    await git("commit", "-m", "auto-commit before session merge", "--allow-empty");
   }
 
   // merge into main
-  const result = await git("merge", branch, "-m", `merge session ${name} (by ${user})`);
+  const result = await git("merge", "--allow-unrelated-histories", branch, "-m", `merge session ${name} (by ${user})`);
 
   if (result.exitCode !== 0) {
     console.error(`[worktree] merge failed for ${name}: ${result.stderr}`);
     // abort failed merge
     await git("merge", "--abort");
-    if (stashed) await git("stash", "pop");
     return { success: false, message: `merge conflict: ${result.stderr}` };
   }
-
-  // re-apply stashed changes on top of the merge
-  if (stashed) await git("stash", "pop");
 
   console.log(`[worktree] merged ${name} into live: ${result.stdout}`);
   return { success: true, message: result.stdout };

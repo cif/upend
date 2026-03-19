@@ -12,12 +12,12 @@
       theme: {
         extend: {
           colors: {
-            bg: '#0a0a0a',
-            surface: '#141414',
-            border: '#262626',
-            muted: '#737373',
+            bg: 'var(--c-bg)',
+            surface: 'var(--c-surface)',
+            border: 'var(--c-border)',
+            muted: 'var(--c-muted)',
             accent: '#f97316',
-            'accent-dim': '#431407',
+            'accent-dim': 'var(--c-accent-dim)',
           },
           fontFamily: {
             mono: ['SF Mono', 'Fira Code', 'Cascadia Code', 'monospace'],
@@ -27,6 +27,25 @@
     };
   </script>
   <style>
+    :root {
+      --c-bg: #0a0a0a;
+      --c-surface: #141414;
+      --c-border: #262626;
+      --c-muted: #737373;
+      --c-accent-dim: #431407;
+    }
+    .light {
+      --c-bg: #ffffff;
+      --c-surface: #f5f5f5;
+      --c-border: #e0e0e0;
+      --c-muted: #6b7280;
+      --c-accent-dim: #fff7ed;
+    }
+    .light .text-gray-200 { color: #1f2937 !important; }
+    .light .text-gray-400 { color: #6b7280 !important; }
+    .light .hover\:text-gray-200:hover { color: #1f2937 !important; }
+    .light .text-white { color: #1f2937 !important; }
+    .light .bg-black\/60 { background-color: rgba(0,0,0,0.3) !important; }
     [x-cloak] { display: none !important; }
     @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     .dot-pulse { animation: pulse-dot 1s infinite; }
@@ -111,6 +130,9 @@
       <i data-lucide="rocket" class="w-3 h-3"></i> publish
     </button>
     <span class="text-muted text-xs" x-text="userEmail"></span>
+    <button @click="toggleTheme()" class="text-muted px-1.5 py-0.5 rounded text-xs cursor-pointer hover:text-gray-200 hover:bg-border" :title="darkMode ? 'switch to light mode' : 'switch to dark mode'">
+      <span x-show="darkMode">&#9788;</span><span x-show="!darkMode">&#9790;</span>
+    </button>
     <button @click="logout()"
       class="text-muted border border-border px-2 py-0.5 rounded text-xs cursor-pointer hover:text-gray-200 hover:border-muted font-mono">logout</button>
   </div>
@@ -605,6 +627,9 @@ function dashboard() {
     apps: [],
     appsOpen: false,
 
+    // theme
+    darkMode: localStorage.getItem('upend_theme') !== 'light',
+
     // resizer state
     _resizing: false,
 
@@ -617,6 +642,9 @@ function dashboard() {
     // ---------- init ----------
 
     init() {
+      // apply theme
+      this.applyTheme();
+
       // init icons + re-render on state changes
       this.$nextTick(() => { if (window.lucide) lucide.createIcons(); });
       this.$watch('currentSessionId', () => this.$nextTick(() => lucide?.createIcons()));
@@ -627,15 +655,41 @@ function dashboard() {
         this.loadApps();
         this.loadTables();
 
-        // check URL for session name: /session/<name> or /<session-name>
+        // restore panel/session from URL
         const path = window.location.pathname;
         const sessionMatch = path.match(/^\/session\/(.+)/);
+        const dataMatch = path.match(/^\/data(?:\/(.+))?$/);
+        const appMatch = path.match(/^\/app\/(.+)$/);
         if (sessionMatch) {
           this.openSessionByName(sessionMatch[1]);
+        } else if (path === '/tasks') {
+          this.rightPanel = 'tasks'; this.loadTasks();
+        } else if (path === '/audit') {
+          this.rightPanel = 'audit'; this.loadAuditLog();
+        } else if (dataMatch) {
+          this.rightPanel = 'data';
+          if (dataMatch[1]) this.$nextTick(() => this.selectTable(dataMatch[1]));
+        } else if (appMatch) {
+          this.rightPanel = appMatch[1];
         } else if (this.currentSessionId) {
           this.openSession(this.currentSessionId);
         }
       }
+
+      // sync URL when panel changes
+      this.$watch('rightPanel', (panel) => {
+        if (this.currentSessionId) return; // session URL takes priority
+        const builtins = { home: '/', data: '/data', tasks: '/tasks', audit: '/audit' };
+        const url = builtins[panel] || `/app/${panel}`;
+        if (window.location.pathname !== url) history.pushState(null, '', url);
+      });
+
+      // sync URL when selected table changes
+      this.$watch('selectedTable', (table) => {
+        if (this.rightPanel !== 'data') return;
+        const url = table ? `/data/${table}` : '/data';
+        if (window.location.pathname !== url) history.replaceState(null, '', url);
+      });
 
       // update URL when session changes
       this.$watch('currentSessionId', (id) => {
@@ -644,12 +698,47 @@ function dashboard() {
           const ctx = typeof s?.context === 'string' ? JSON.parse(s.context) : s?.context;
           const name = ctx?.worktree || s?.snapshotName;
           if (name) history.replaceState(null, '', `/session/${name}`);
-        } else {
+        } else if (this.rightPanel === 'home') {
           history.replaceState(null, '', '/');
         }
       });
+
+      // handle back/forward
+      window.addEventListener('popstate', () => this.restoreFromURL());
+
       document.addEventListener('mousemove', (e) => this.onResize(e));
       document.addEventListener('mouseup', () => this.stopResize());
+    },
+
+    restoreFromURL() {
+      const path = window.location.pathname;
+      const sessionMatch = path.match(/^\/session\/(.+)/);
+      const dataMatch = path.match(/^\/data(?:\/(.+))?$/);
+      const appMatch = path.match(/^\/app\/(.+)$/);
+      if (sessionMatch) {
+        this.openSessionByName(sessionMatch[1]);
+      } else if (path === '/tasks') {
+        this.rightPanel = 'tasks'; this.loadTasks();
+      } else if (path === '/audit') {
+        this.rightPanel = 'audit'; this.loadAuditLog();
+      } else if (dataMatch) {
+        this.rightPanel = 'data';
+        if (dataMatch[1]) this.selectTable(dataMatch[1]);
+      } else if (appMatch) {
+        this.rightPanel = appMatch[1];
+      } else {
+        this.rightPanel = 'home';
+      }
+    },
+
+    toggleTheme() {
+      this.darkMode = !this.darkMode;
+      localStorage.setItem('upend_theme', this.darkMode ? 'dark' : 'light');
+      this.applyTheme();
+    },
+
+    applyTheme() {
+      document.documentElement.classList.toggle('light', !this.darkMode);
     },
 
     // ---------- auth ----------
@@ -920,6 +1009,7 @@ function dashboard() {
       }
 
       this.prompt = '';
+      this.$nextTick(() => { if (this.$refs.chatInput) this.$refs.chatInput.style.height = 'auto'; });
       this.messages.push({ role: 'user', content: text });
       this.scrollToBottom();
 
@@ -1231,8 +1321,10 @@ function dashboard() {
 
     scrollToBottom() {
       this.$nextTick(() => {
-        const el = this.$refs.messages;
-        if (el) el.scrollTop = el.scrollHeight;
+        requestAnimationFrame(() => {
+          const el = this.$refs.messages;
+          if (el) el.scrollTop = el.scrollHeight;
+        });
       });
     },
   };

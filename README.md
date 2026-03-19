@@ -1,287 +1,267 @@
 # upend
 
-Anti-SaaS stack. No git workflows. No CI/CD. Deploy via rsync. Edit live. One backup.
+Anti-SaaS stack. Your code, your server, your database. Deploy via rsync. Edit live with Claude.
 
-Bun + Hono + Neon Postgres. Custom JWT auth. Claude editing sessions with file + database snapshots. Hot-deployed frontend apps from the filesystem.
+Bun + Hono + Neon Postgres + Caddy. Custom JWT auth. Claude editing sessions with git worktree isolation.
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`)
-- [Caddy](https://caddyserver.com) (`brew install caddy`)
-- [Claude Code](https://claude.ai/code) (`npm i -g @anthropic-ai/claude-code`)
-- A [Neon](https://neon.tech) database (free tier works)
+- [Bun](https://bun.sh) — `curl -fsSL https://bun.sh/install | bash`
+- [Caddy](https://caddyserver.com) — `brew install caddy`
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `npm i -g @anthropic-ai/claude-code`
+- [neonctl](https://neon.tech/docs/reference/neon-cli) — `npm i -g neonctl`
 
-## Setup
-
-```bash
-bun install
-
-# configure your env
-cp .env.example .env
-# paste your Neon DATABASE_URL into .env
-
-# encrypt it (only needs to happen once, then after any .env changes)
-npx dotenvx encrypt
-
-# run migrations
-bun run migrate
-
-# start everything
-bun run dev
-```
-
-This starts:
-- **API** on `:3001`
-- **Claude service** on `:3002`
-- **Caddy** reverse proxy on `:4000`
-
-Everything is accessible through Caddy at `http://localhost:4000`:
-
-| URL | What |
-|-----|------|
-| `/api/auth/signup` | Create account (POST `{email, password}`) |
-| `/api/auth/login` | Login (POST `{email, password}` → `{user, token}`) |
-| `/api/data/:table` | CRUD any table (GET/POST/PATCH/DELETE, requires auth) |
-| `/api/stream/logs` | SSE log stream |
-| `/.well-known/jwks.json` | Public keys for JWT verification |
-| `/claude/ui/` | Chat UI for Claude editing sessions |
-| `/claude/sessions` | Session management API |
-| `/claude/apps` | App management API |
-| `/apps/:name/` | Live apps served from filesystem |
-
-## Working with the API
-
-Sign up and get a token:
+## Quickstart
 
 ```bash
-curl -X POST localhost:4000/api/auth/signup \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"you@example.com","password":"yourpassword"}'
-# → { user: {...}, token: "eyJ..." }
+bunx @upend/cli init my-project
+cd my-project
+bunx upend migrate
+bunx upend dev
 ```
 
-Use the token for authenticated requests:
+Open http://localhost:4000.
+
+## Project structure
+
+```
+my-project/
+├── apps/                 → frontend apps (HTML/JS/CSS)
+│   └── users/            → built-in user management app
+├── services/             → custom backend services (Hono APIs)
+├── tasks/                → background tasks (cron or manual)
+├── migrations/           → SQL migrations (numbered)
+├── .env                  → secrets (gitignored, Bun auto-loads)
+├── .keys/                → JWT signing keys (gitignored)
+├── upend.config.ts       → project config
+├── CLAUDE.md             → instructions for Claude
+└── package.json
+```
+
+## Architecture
+
+```
+                         :4000 (Caddy)
+                              │
+                 ┌────────────┴────────────┐
+                 │                         │
+           /claude/*                  everything else
+                 │                         │
+          Claude Service              Gateway :3001
+            :3002                          │
+          ┌──────────┐      ┌──────────────┼──────────────┐
+          │ sessions │      │              │              │
+          │ websocket│    /api/*      /apps/*      /services/*
+          │ preview  │      │          │              │
+          └──────────┘    built-in    static       dispatcher
+                            │        files       (dynamic import)
+                     ┌──────┼──────┐
+                     │      │      │
+                   auth   data   tasks
+                   JWKS   CRUD   audit
+                   SSO    RLS    policies
+                              │
+                         ┌────┴────┐
+                         │ Postgres │
+                         │  (Neon)  │
+                         └─────────┘
+```
+
+Caddy only does two things: route `/claude/*` to the Claude service, and send everything else to the gateway. Cloudflare handles TLS in production.
+
+### The gateway
+
+The gateway is the framework layer. It handles auth, data, and dispatches to your custom code:
+
+| Endpoint | What |
+|----------|------|
+| `POST /api/auth/signup` | Create account `{email, password}` → `{user, token}` |
+| `POST /api/auth/login` | Login `{email, password}` → `{user, token}` |
+| `POST /api/auth/impersonate` | Admin: mint token as another user |
+| `GET /api/auth/sso/:provider` | OAuth login (GitHub, Google, etc) |
+| `GET /.well-known/jwks.json` | Public keys for JWT verification |
+| `GET/POST/PATCH/DELETE /api/data/:table` | CRUD any public table (RLS enforced) |
+| `GET /api/tables` | List tables |
+| `GET /api/tables/:name` | Table columns |
+| `GET /api/policies` | RLS policies |
+| `GET /api/audit` | Audit log |
+| `GET /api/tasks` | List tasks |
+| `POST /api/tasks/:name/run` | Run a task (admin only) |
+| `GET /apps/*` | Serve frontend apps (with auth) |
+| `ALL /services/:name/*` | Dispatch to custom services |
+
+### Three types of user code
+
+**Apps** (`apps/<name>/`) — Frontend HTML/JS/CSS. Served at `/apps/<name>/`. No build step.
+
+```js
+const token = localStorage.getItem('upend_token');
+const res = await fetch('/api/data/projects', {
+  headers: { 'Authorization': `Bearer ${token}` }
+});
+```
+
+**Services** (`services/<name>/index.ts`) — Custom backend APIs. Auto-mounted at `/services/<name>/*`.
+
+```ts
+// services/goodbyes/index.ts
+import { Hono } from "hono";
+import { sql } from "../../lib/db";
+
+const app = new Hono();
+app.get("/random", async (c) => {
+  const [row] = await sql`SELECT * FROM goodbyes ORDER BY random() LIMIT 1`;
+  return c.json(row);
+});
+export default app;
+// → GET /services/goodbyes/random
+```
+
+**Tasks** (`tasks/<name>.ts`) — Background functions. Run via API, dashboard button, or cron.
+
+```ts
+// tasks/daily-report.ts
+// @cron 0 9 * * *
+// @description send the daily report
+import { notify } from "../lib/notify";
+
+export async function run() {
+  await notify({ email: "team@example.com", subject: "Daily Report", body: "..." });
+}
+run().then(() => process.exit(0));
+// → POST /api/tasks/daily-report/run
+```
+
+## Data API
+
+Every table in the `public` schema is available via `/api/data/:table`:
 
 ```bash
 TOKEN="eyJ..."
 
-# create
-curl -X POST localhost:4000/api/data/things \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"my thing","data":{"foo":"bar"},"owner_id":"YOUR_USER_ID"}'
-
 # list
-curl localhost:4000/api/data/things \
+curl '/api/data/projects?order=created_at.desc&limit=10' \
   -H "Authorization: Bearer $TOKEN"
 
+# filter
+curl '/api/data/projects?status=eq.active&owner_id=eq.abc-123' \
+  -H "Authorization: Bearer $TOKEN"
+
+# create
+curl -X POST /api/data/projects \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"new project"}'
+
 # update
-curl -X PATCH localhost:4000/api/data/things/1 \
+curl -X PATCH '/api/data/projects?id=eq.5' \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"name":"updated"}'
 
 # delete
-curl -X DELETE localhost:4000/api/data/things/1 \
+curl -X DELETE '/api/data/projects?id=eq.5' \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-RLS policies enforce that users can only see their own rows (via `owner_id`).
+Filter operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `is`.
 
-## Making changes with Claude
+### RLS (Row Level Security)
 
-### Chat UI
+The data API sets JWT claims as Postgres session variables before every query:
+- `current_setting('request.jwt.sub')` — user ID
+- `current_setting('request.jwt.role')` — user role
+- `current_setting('request.jwt.email')` — user email
 
-Open `http://localhost:4000/claude/ui/` in your browser. Log in, then tell Claude what to do. It has full access to the codebase — edits go live (Bun's `--watch` picks up changes automatically).
+Create RLS policies in migrations:
 
-Before Claude touches anything, the system snapshots all files + the database. If things go sideways, hit the rollback button.
+```sql
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects FORCE ROW LEVEL SECURITY;
 
-### API changes
-
-Tell Claude things like:
-- "add a `projects` table with name, description, and status columns"
-- "add rate limiting to the API"
-- "add a webhook endpoint that posts to Slack"
-
-Claude will create migrations, edit route files, whatever it needs. Changes to the API are picked up by `--watch` automatically.
-
-### Via curl
-
-```bash
-# start a session
-curl -X POST localhost:4000/claude/sessions \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"add a projects table and CRUD endpoints for it"}'
-
-# continue the conversation
-curl -X POST localhost:4000/claude/sessions/1/messages \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"also add an owner_id column with RLS"}'
-
-# watch it work
-curl localhost:4000/claude/sessions/1/stream
+CREATE POLICY "read_all" ON projects FOR SELECT USING (true);
+CREATE POLICY "update_own" ON projects FOR UPDATE
+  USING (owner_id::text = current_setting('request.jwt.sub'));
+CREATE POLICY "admin_delete" ON projects FOR DELETE
+  USING (current_setting('request.jwt.role') = 'admin');
 ```
 
-## Hot-deployed frontend apps
+The dashboard data tab shows active RLS policies per table.
 
-Apps are just files in the `apps/` directory, served directly by Caddy. No build step, no restart. Drop files in, they're live.
+## Notifications
 
-### Generate an app with Claude
+```ts
+import { notify } from "../lib/notify";
 
-```bash
-curl -X POST localhost:4000/claude/apps/generate \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "dashboard",
-    "prompt": "build a dashboard that lists all things from the API with create/edit/delete. dark theme, clean UI."
-  }'
-# → generating... live at /apps/dashboard/ when done
-```
+// email (requires RESEND_API_KEY in .env)
+await notify({ email: "ben@example.com", subject: "Done", body: "..." });
 
-Or tell Claude in the chat UI: *"create an app called dashboard in apps/dashboard that shows all things from the API"*
-
-### Create an app from raw files
-
-```bash
-curl -X POST localhost:4000/claude/apps \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "hello",
-    "files": {
-      "index.html": "<!DOCTYPE html><html><body><h1>hello</h1></body></html>"
-    }
-  }'
-# → instantly live at /apps/hello/
-```
-
-### App conventions
-
-Apps are static HTML/JS/CSS. They can call the API at `/api/` (same origin, no CORS issues). Auth tokens are stored in `localStorage` as `upend_token`. Include the token in requests:
-
-```js
-const token = localStorage.getItem('upend_token');
-const res = await fetch('/api/data/things', {
-  headers: { 'Authorization': `Bearer ${token}` }
+// slack webhook (requires SLACK_WEBHOOK_URL in .env)
+await notify({
+  webhook: process.env.SLACK_WEBHOOK_URL,
+  payload: { message: "task complete", url: "https://..." }
 });
-const things = await res.json();
+
+// both at once
+await notify({ email: "...", webhook: "...", subject: "Alert", body: "..." });
 ```
 
-### List apps
+## Audit log
+
+Every login, signup, impersonation, and task run is logged to `audit.log` (append-only, protected by RLS — no updates or deletes). Visible in the dashboard audit tab.
+
+## Editing with Claude
+
+The dashboard at `/` has a built-in chat. Each conversation creates an isolated git worktree — Claude edits files there, you preview the changes, then click **Publish** to merge into live.
+
+If something breaks, close the session without publishing. Your live code is untouched.
+
+## Deploy
 
 ```bash
-curl localhost:4000/claude/apps
-# → [{ name: "dashboard", url: "/apps/dashboard/", created: "..." }]
+# provision an EC2 instance
+bunx upend infra:aws
+
+# set deploy target
+bunx upend env:set DEPLOY_HOST ec2-user@<ip>
+
+# deploy (rsync → install → migrate → restart → install cron tasks)
+bunx upend deploy
+
+# check health
+bunx upend status
+
+# tail logs
+bunx upend logs
+bunx upend logs api -f
+
+# SSH in
+bunx upend ssh
+bunx upend ssh "bun -v"
 ```
 
-## Database migrations
-
-Plain SQL files in `migrations/`, numbered `001_name.sql`. Run them:
-
-```bash
-bun run migrate
-```
-
-Or tell Claude: *"create a migration for a projects table"* — it'll create the SQL file and run it.
-
-## Project structure
-
-```
-upend/
-├── services/
-│   ├── api/              → :3001 — auth, CRUD, SSE logs
-│   │   ├── index.ts
-│   │   ├── routes.ts
-│   │   └── auth-routes.ts
-│   └── claude/           → :3002 — editing sessions, app generator
-│       ├── index.ts
-│       ├── snapshots.ts
-│       └── public/       → chat UI
-├── apps/                 → hot-deployed frontends (served by Caddy)
-├── lib/
-│   ├── db.ts             → postgres.js connection
-│   ├── auth.ts           → JWT signing/verification, JWKS
-│   └── middleware.ts     → auth middleware
-├── migrations/           → plain SQL, numbered
-├── infra/
-│   ├── Caddyfile         → production reverse proxy
-│   ├── Caddyfile.dev     → local reverse proxy (:4000)
-│   ├── services.json     → service registry
-│   ├── upend@.service    → systemd template
-│   └── setup.sh          → one-time EC2 setup
-├── .keys/                → RSA keys for JWT (gitignored)
-├── .snapshots/           → file + db snapshots (gitignored)
-├── .env                  → encrypted by dotenvx (safe to commit)
-├── .env.keys             → decryption keys (gitignored, NEVER commit)
-├── index.ts              → entry point: starts all services + caddy
-├── deploy.sh             → rsync deploy to EC2
-└── new-service.sh        → scaffold a new service
-```
-
-## Adding a new service
-
-```bash
-./new-service.sh webhooks 3003
-# creates services/webhooks/index.ts, registers in services.json, adds Caddy route
-```
-
-## Snapshots and rollback
-
-Every Claude editing session snapshots files + database before making changes. To rollback:
-
-```bash
-# list snapshots
-curl localhost:4000/claude/snapshots
-
-# rollback (restores files AND database)
-curl -X POST localhost:4000/claude/rollback \
-  -H 'Content-Type: application/json' \
-  -d '{"snapshot":"snap-2026-03-15T05-06-46-393Z"}'
-```
-
-A safety snapshot is taken before every rollback, so you can undo the undo.
-
-## SSO / OAuth
-
-Built-in support for Google, GitHub, and Microsoft. Or any OIDC provider. Add env vars:
-
-```bash
-# Google
-OAUTH_GOOGLE_CLIENT_ID=xxx
-OAUTH_GOOGLE_CLIENT_SECRET=xxx
-
-# Any OIDC provider
-OAUTH_CORPNAME_CLIENT_ID=xxx
-OAUTH_CORPNAME_CLIENT_SECRET=xxx
-OAUTH_CORPNAME_AUTHORIZE_URL=https://sso.corp.com/authorize
-OAUTH_CORPNAME_TOKEN_URL=https://sso.corp.com/token
-OAUTH_CORPNAME_USERINFO_URL=https://sso.corp.com/userinfo
-```
-
-Then `GET /api/auth/sso/google` (or `/api/auth/sso/corpname`) kicks off the OAuth flow.
-
-## Deploy to EC2
-
-```bash
-# set your deploy target
-export DEPLOY_HOST=ec2-user@your-instance-ip
-
-# first time: SSH in and run setup
-ssh $DEPLOY_HOST 'bash -s' < infra/setup.sh
-
-# deploy (rsync → install → migrate → restart)
-./deploy.sh
-
-# deploy a single service
-./deploy.sh api
-```
-
-## Scripts
+## CLI Commands
 
 | Command | What |
 |---------|------|
-| `bun run dev` | Start all services + Caddy locally |
-| `bun run dev:api` | Start just the API service |
-| `bun run dev:claude` | Start just the Claude service |
-| `bun run migrate` | Run database migrations |
-| `bun run deploy` | Deploy to remote host |
-| `bun run new-service <name>` | Scaffold a new service |
+| `upend init <name>` | Scaffold project (creates Neon DB, keys, admin user) |
+| `upend dev` | Start gateway + claude + caddy locally |
+| `upend migrate` | Run SQL migrations |
+| `upend deploy` | rsync to remote, install, migrate, restart |
+| `upend status` | Check remote service health |
+| `upend logs [service]` | Tail remote logs (`-f` to follow) |
+| `upend ssh [cmd]` | SSH into remote instance |
+| `upend tasks` | List tasks and cron schedules |
+| `upend tasks run <name>` | Run a task manually |
+| `upend tasks install` | Install cron schedules |
+| `upend env:set <K> <V>` | Set an env var in .env |
+| `upend infra:aws` | Provision an EC2 instance |
+
+## Philosophy
+
+- **One server per customer.** Vertical scaling. No multi-tenant complexity.
+- **No git workflows.** Claude edits in a worktree. Publish when ready.
+- **No CI/CD.** `rsync --delete` is the deploy.
+- **No build step.** Bun runs TypeScript directly. Apps are static files.
+- **Plain `.env`.** Gitignored. No encryption overhead. rsync to deploy secrets.
+- **Audit everything.** Append-only log. No one can delete it.

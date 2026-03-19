@@ -261,6 +261,11 @@ app.get("/apps/*", async (c) => {
   const token = header?.startsWith("Bearer ") ? header.slice(7) : cookieToken;
 
   if (!token) {
+    // If loaded in an iframe (Sec-Fetch-Dest: iframe), return 401 page instead of
+    // redirecting to dashboard (which causes infinite iframe recursion)
+    if (c.req.header("Sec-Fetch-Dest") === "iframe") {
+      return c.html(`<html><body style="background:#0a0a0a;color:#737373;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>not authenticated — <a href="/" target="_top" style="color:#f97316">log in</a></p></body></html>`, 401);
+    }
     return c.redirect(`/?next=${encodeURIComponent(c.req.path)}`);
   }
 
@@ -268,6 +273,9 @@ app.get("/apps/*", async (c) => {
     const { verifyToken } = await import("../../lib/auth");
     await verifyToken(token);
   } catch {
+    if (c.req.header("Sec-Fetch-Dest") === "iframe") {
+      return c.html(`<html><body style="background:#0a0a0a;color:#737373;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>session expired — <a href="/" target="_top" style="color:#f97316">log in</a></p></body></html>`, 401);
+    }
     return c.redirect(`/?next=${encodeURIComponent(c.req.path)}`);
   }
 

@@ -132,26 +132,60 @@ export async function mergeToLive(name: string, user: string): Promise<{ success
   await gitIn(worktreePath, "add", "-A", "--", ".", ":!.env", ":!.env.keys", ":!.keys");
   await gitIn(worktreePath, "commit", "-m", `session ${name}: final changes`, "--allow-empty");
 
-  // commit any uncommitted changes on main so git merge can proceed
-  // (stashing would modify the working tree and kill the running service)
-  const status = await git("status", "--porcelain");
-  if (status.stdout) {
-    await git("add", "-A");
-    await git("commit", "-m", "auto-commit before session merge", "--allow-empty");
+  // check if histories are related
+  const baseResult = await git("merge-base", "HEAD", branch);
+
+  if (baseResult.exitCode === 0) {
+    // related histories — normal merge
+    const result = await git("merge", branch, "-m", `merge session ${name} (by ${user})`);
+    if (result.exitCode !== 0) {
+      console.error(`[worktree] merge failed for ${name}: ${result.stderr}`);
+      await git("merge", "--abort");
+      return { success: false, message: `merge conflict: ${result.stderr}` };
+    }
+    console.log(`[worktree] merged ${name} into live: ${result.stdout}`);
+    return { success: true, message: result.stdout };
   }
 
-  // merge into main
-  const result = await git("merge", "--allow-unrelated-histories", branch, "-m", `merge session ${name} (by ${user})`);
+  // unrelated histories — copy changed files from the session directly
+  // find the session's fork point and get files changed since then
+  const forkPoint = await gitIn(worktreePath, "log", "--format=%H", "--reverse");
+  const firstCommit = forkPoint.stdout.split("\n")[0];
+  const changedFiles = await gitIn(worktreePath, "diff", "--name-only", "--diff-filter=ACMR", `${firstCommit}~1..HEAD`);
 
-  if (result.exitCode !== 0) {
-    console.error(`[worktree] merge failed for ${name}: ${result.stderr}`);
-    // abort failed merge
-    await git("merge", "--abort");
-    return { success: false, message: `merge conflict: ${result.stderr}` };
+  if (!changedFiles.stdout.trim() || changedFiles.exitCode !== 0) {
+    // try diffing the tree directly
+    const allFiles = await gitIn(worktreePath, "diff", "--name-only", "HEAD~1", "HEAD");
+    if (!allFiles.stdout.trim()) {
+      return { success: true, message: "no changes to merge" };
+    }
+    // copy each changed file
+    for (const file of allFiles.stdout.trim().split("\n")) {
+      const content = await gitIn(worktreePath, "show", `HEAD:${file}`);
+      if (content.exitCode === 0) {
+        const destPath = `${PROJECT_ROOT}/${file}`;
+        const dir = destPath.substring(0, destPath.lastIndexOf("/"));
+        await Bun.spawn(["mkdir", "-p", dir]).exited;
+        await Bun.write(destPath, content.stdout);
+      }
+    }
+  } else {
+    for (const file of changedFiles.stdout.trim().split("\n")) {
+      const content = await gitIn(worktreePath, "show", `HEAD:${file}`);
+      if (content.exitCode === 0) {
+        const destPath = `${PROJECT_ROOT}/${file}`;
+        const dir = destPath.substring(0, destPath.lastIndexOf("/"));
+        await Bun.spawn(["mkdir", "-p", dir]).exited;
+        await Bun.write(destPath, content.stdout);
+      }
+    }
   }
 
-  console.log(`[worktree] merged ${name} into live: ${result.stdout}`);
-  return { success: true, message: result.stdout };
+  // commit the copied files
+  await git("add", "-A");
+  const commitResult = await git("commit", "-m", `merge session ${name} (by ${user})`);
+  console.log(`[worktree] applied ${name} to live: ${commitResult.stdout}`);
+  return { success: true, message: commitResult.stdout };
 }
 
 // clean up a worktree after merge

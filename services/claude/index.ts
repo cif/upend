@@ -413,6 +413,7 @@ function restartServices() {
     pkill -f "bun.*services/api/index.ts" 2>/dev/null || true
     sleep 1
     cd ${PROJECT_ROOT}
+    source .env 2>/dev/null || true
     nohup bun services/api/index.ts > /tmp/upend-api.log 2>&1 &
     echo "api restarted"
   `], {

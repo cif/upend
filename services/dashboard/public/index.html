@@ -815,7 +815,10 @@ function dashboard() {
         const check = await checkRes.json();
 
         if (!check.mergeable) {
-          this.messages.push({ role: 'system', content: `merge has conflicts:\n${check.conflicts.join('\n')}\n\ntell claude to resolve them, then try again.` });
+          const detail = check.conflicts.length > 0
+            ? `merge has conflicts:\n${check.conflicts.join('\n')}\n\ntell claude to resolve them, then try again.`
+            : `merge failed: ${check.error || 'unknown error'}\n\ntell claude to investigate, then try again.`;
+          this.messages.push({ role: 'system', content: detail });
           return;
         }
       } catch {}

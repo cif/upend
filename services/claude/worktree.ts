@@ -73,7 +73,7 @@ export async function commitWorktree(name: string, message: string): Promise<str
 }
 
 // check if a session can merge cleanly into live
-export async function checkMergeable(name: string): Promise<{ mergeable: boolean; conflicts: string[] }> {
+export async function checkMergeable(name: string): Promise<{ mergeable: boolean; conflicts: string[]; error?: string }> {
   const branch = `session/${name}`;
 
   // auto-commit any pending changes in the worktree first
@@ -81,12 +81,21 @@ export async function checkMergeable(name: string): Promise<{ mergeable: boolean
   await gitIn(worktreePath, "add", "-A", "--", ".", ":!.env", ":!.env.keys", ":!.keys");
   await gitIn(worktreePath, "commit", "-m", `auto-commit before merge check`, "--allow-empty");
 
+  // make sure main working tree is clean before attempting merge
+  const status = await git("status", "--porcelain");
+  if (status.stdout) {
+    // stash any uncommitted changes on main so the merge check can proceed
+    await git("stash", "push", "--include-untracked", "-m", "merge-check-stash");
+    var stashed = true;
+  }
+
   // try a dry-run merge
   const result = await git("merge", "--no-commit", "--no-ff", branch);
 
   if (result.exitCode === 0) {
     // clean merge — abort it (we were just checking)
     await git("merge", "--abort");
+    if (stashed!) await git("stash", "pop");
     return { mergeable: true, conflicts: [] };
   }
 
@@ -96,8 +105,12 @@ export async function checkMergeable(name: string): Promise<{ mergeable: boolean
 
   // abort the failed merge
   await git("merge", "--abort");
+  if (stashed!) await git("stash", "pop");
 
-  return { mergeable: false, conflicts };
+  // if no file conflicts detected, include the merge error message
+  const error = conflicts.length === 0 ? (result.stderr || result.stdout || "merge failed for unknown reason") : undefined;
+
+  return { mergeable: false, conflicts, error };
 }
 
 // merge a session into live (main branch)
@@ -109,6 +122,14 @@ export async function mergeToLive(name: string, user: string): Promise<{ success
   await gitIn(worktreePath, "add", "-A", "--", ".", ":!.env", ":!.env.keys", ":!.keys");
   await gitIn(worktreePath, "commit", "-m", `session ${name}: final changes`, "--allow-empty");
 
+  // stash any uncommitted/untracked changes on main so the merge can proceed
+  const status = await git("status", "--porcelain");
+  let stashed = false;
+  if (status.stdout) {
+    await git("stash", "push", "--include-untracked", "-m", "merge-live-stash");
+    stashed = true;
+  }
+
   // merge into main
   const result = await git("merge", branch, "-m", `merge session ${name} (by ${user})`);
 
@@ -116,8 +137,12 @@ export async function mergeToLive(name: string, user: string): Promise<{ success
     console.error(`[worktree] merge failed for ${name}: ${result.stderr}`);
     // abort failed merge
     await git("merge", "--abort");
+    if (stashed) await git("stash", "pop");
     return { success: false, message: `merge conflict: ${result.stderr}` };
   }
+
+  // re-apply stashed changes on top of the merge
+  if (stashed) await git("stash", "pop");
 
   console.log(`[worktree] merged ${name} into live: ${result.stdout}`);
   return { success: true, message: result.stdout };

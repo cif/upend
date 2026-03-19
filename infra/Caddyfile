@@ -3,48 +3,13 @@
 }
 
 :80 {
-	# Neon Data API proxy
-	handle_path /api/data/* {
-		rewrite * /neondb/rest/v1{uri}
-		reverse_proxy https://ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech {
-			header_up Host ep-young-mountain-adv0q076.apirest.c-2.us-east-1.aws.neon.tech
-		}
-	}
-
-	# Live apps
-	handle_path /apps/* {
-		root * /opt/upend/apps
-		try_files {path} {path}/index.html
-		file_server
-	}
-
-	# API service (auth, JWKS)
-	handle_path /api/* {
-		reverse_proxy localhost:3001
-	}
-
-	# Claude service + WebSocket
+	# Claude service (sessions + WebSocket)
 	handle_path /claude/* {
 		reverse_proxy localhost:3002
 	}
 
-	# pgweb data studio
-	handle /studio {
-		redir /studio/ permanent
-	}
-	handle_path /studio/* {
-		reverse_proxy localhost:4983
-	}
-
-	# JWKS at root
-	handle /.well-known/* {
-		reverse_proxy localhost:3001
-	}
-
-	# Default → dashboard
+	# Everything else → gateway
 	handle {
-		root * /opt/upend/services/dashboard/public
-		try_files {path} /index.html
-		file_server
+		reverse_proxy localhost:3001
 	}
 }

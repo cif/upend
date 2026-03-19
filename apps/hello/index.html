@@ -176,6 +176,14 @@
   const DATA_API = '/api/data';
   let token = localStorage.getItem('upend_token');
 
+  function getTokenPayload() {
+    if (!token) return null;
+    try {
+      const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      return JSON.parse(atob(b64));
+    } catch { return null; }
+  }
+
   function authHeaders() {
     return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
   }
@@ -233,7 +241,7 @@
           <td>${t.shipped
             ? '<span class="shipped-badge">shipped</span>'
             : '<span class="unshipped-badge">pending</span>'}</td>
-          <td>${new Date(t.created_at).toLocaleDateString()}</td>
+          <td>${new Date(t.createdAt).toLocaleDateString()}</td>
           <td class="row-actions">
             <button class="secondary" onclick='openEdit(${t.id}, ${JSON.stringify(t.name)}, ${JSON.stringify(t.sku||'')}, ${t.shipped})'>edit</button>
             <button class="danger" onclick="deleteThing(${t.id})">del</button>
@@ -248,12 +256,14 @@
   async function addThing() {
     const name = document.getElementById('new-name').value.trim();
     const sku = document.getElementById('new-sku').value.trim();
-    if (!name) return;
+    if (!name) { setError('name is required'); return; }
     try {
+      const payload = getTokenPayload();
+      const owner_id = payload?.sub;
       const res = await fetch(`${DATA_API}/things`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Prefer': 'return=representation' },
-        body: JSON.stringify({ name, sku: sku || null })
+        body: JSON.stringify({ name, sku: sku || null, owner_id })
       });
       if (!res.ok) throw new Error(await res.text());
       document.getElementById('new-name').value = '';

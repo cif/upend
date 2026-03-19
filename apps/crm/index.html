@@ -254,27 +254,27 @@
   // --- Data ---
   async function loadAll() {
     await Promise.all([loadReps(), loadAccounts(), loadContacts()]);
+    renderReps();
+    renderAccounts();
+    renderContacts();
+    populateRepSelects();
+    populateAccountSelects();
   }
 
   async function loadReps() {
     const res = await fetch(`${API}/reps?order=name`, { headers: headers() });
     if (res.status === 401) { logout(); return; }
     allReps = await res.json();
-    renderReps();
-    populateRepSelects();
   }
 
   async function loadAccounts() {
     const res = await fetch(`${API}/accounts?order=name`, { headers: headers() });
     allAccounts = await res.json();
-    renderAccounts();
-    populateAccountSelects();
   }
 
   async function loadContacts() {
     const res = await fetch(`${API}/contacts?order=last_name,first_name`, { headers: headers() });
     allContacts = await res.json();
-    renderContacts();
   }
 
   // --- Render ---
@@ -287,7 +287,7 @@
     return a ? h(a.name) : '<span class="muted">—</span>';
   }
   function accountCount(repId) {
-    return allAccounts.filter(a => a.rep_id == repId).length;
+    return allAccounts.filter(a => a.repId == repId).length;
   }
 
   function renderAccounts(list) {
@@ -298,7 +298,7 @@
       <td><strong>${h(a.name)}</strong></td>
       <td>${a.industry ? `<span class="tag">${h(a.industry)}</span>` : '<span class="muted">—</span>'}</td>
       <td>${a.website ? `<a href="${h(a.website)}" target="_blank" style="color:#f97316;text-decoration:none">${h(a.website)}</a>` : '<span class="muted">—</span>'}</td>
-      <td>${repName(a.rep_id)}</td>
+      <td>${repName(a.repId)}</td>
       <td class="actions">
         <button class="ghost sm" onclick='editAccount(${a.id})'>edit</button>
         <button class="danger sm" onclick="deleteAccount(${a.id})">del</button>
@@ -311,11 +311,11 @@
     const tbody = document.getElementById('contacts-list');
     if (!list.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">no contacts</td></tr>'; return; }
     tbody.innerHTML = list.map(c => `<tr>
-      <td><strong>${h(c.first_name)} ${h(c.last_name||'')}</strong></td>
+      <td><strong>${h(c.firstName)} ${h(c.lastName||'')}</strong></td>
       <td class="muted">${h(c.title||'—')}</td>
       <td>${c.email ? `<a href="mailto:${h(c.email)}" style="color:#f97316;text-decoration:none">${h(c.email)}</a>` : '<span class="muted">—</span>'}</td>
       <td class="muted">${h(c.phone||'—')}</td>
-      <td>${accountName(c.account_id)}</td>
+      <td>${accountName(c.accountId)}</td>
       <td class="actions">
         <button class="ghost sm" onclick='editContact(${c.id})'>edit</button>
         <button class="danger sm" onclick="deleteContact(${c.id})">del</button>
@@ -350,8 +350,8 @@
   function filterContacts() {
     const q = document.getElementById('search-contacts').value.toLowerCase();
     renderContacts(allContacts.filter(c =>
-      (c.first_name||'').toLowerCase().includes(q) ||
-      (c.last_name||'').toLowerCase().includes(q) ||
+      (c.firstName||'').toLowerCase().includes(q) ||
+      (c.lastName||'').toLowerCase().includes(q) ||
       (c.email||'').toLowerCase().includes(q) ||
       (c.title||'').toLowerCase().includes(q)
     ));
@@ -420,13 +420,13 @@
 
   // --- Accounts CRUD ---
   function editAccount(id) {
-    const a = allAccounts.find(a => a.id === id);
+    const a = allAccounts.find(a => a.id == id);
     document.getElementById('account-modal-title').textContent = 'edit account';
     document.getElementById('account-id').value = a.id;
     document.getElementById('account-name').value = a.name;
     document.getElementById('account-industry').value = a.industry || '';
     document.getElementById('account-website').value = a.website || '';
-    document.getElementById('account-rep').value = a.rep_id || '';
+    document.getElementById('account-rep').value = a.repId || '';
     document.getElementById('modal-account').classList.add('open');
   }
 
@@ -457,7 +457,9 @@
       }
       closeModal('account');
       await loadAccounts();
+      renderAccounts();
       renderReps();
+      populateAccountSelects();
     } catch(e) { setErr(e.message); }
   }
 
@@ -466,20 +468,22 @@
     const res = await fetch(`${API}/accounts?id=eq.${id}`, { method: 'DELETE', headers: headers() });
     if (!res.ok) { setErr(await res.text()); return; }
     await loadAccounts();
+    renderAccounts();
     renderReps();
+    populateAccountSelects();
   }
 
   // --- Contacts CRUD ---
   function editContact(id) {
-    const c = allContacts.find(c => c.id === id);
+    const c = allContacts.find(c => c.id == id);
     document.getElementById('contact-modal-title').textContent = 'edit contact';
     document.getElementById('contact-id').value = c.id;
-    document.getElementById('contact-first').value = c.first_name;
-    document.getElementById('contact-last').value = c.last_name || '';
+    document.getElementById('contact-first').value = c.firstName;
+    document.getElementById('contact-last').value = c.lastName || '';
     document.getElementById('contact-email').value = c.email || '';
     document.getElementById('contact-phone').value = c.phone || '';
     document.getElementById('contact-title').value = c.title || '';
-    document.getElementById('contact-account').value = c.account_id || '';
+    document.getElementById('contact-account').value = c.accountId || '';
     document.getElementById('modal-contact').classList.add('open');
   }
 
@@ -511,6 +515,7 @@
       }
       closeModal('contact');
       await loadContacts();
+      renderContacts();
     } catch(e) { setErr(e.message); }
   }
 
@@ -518,12 +523,13 @@
     if (!confirm('delete this contact?')) return;
     const res = await fetch(`${API}/contacts?id=eq.${id}`, { method: 'DELETE', headers: headers() });
     if (!res.ok) { setErr(await res.text()); return; }
-    loadContacts();
+    await loadContacts();
+    renderContacts();
   }
 
   // --- Reps CRUD ---
   function editRep(id) {
-    const r = allReps.find(r => r.id === id);
+    const r = allReps.find(r => r.id == id);
     document.getElementById('rep-modal-title').textContent = 'edit rep';
     document.getElementById('rep-id').value = r.id;
     document.getElementById('rep-name').value = r.name;
@@ -551,7 +557,7 @@
         if (!res.ok) throw new Error(await res.text());
       }
       closeModal('rep');
-      await loadReps();
+      await loadAll();
     } catch(e) { setErr(e.message); }
   }
 

@@ -84,6 +84,25 @@
     </form>
   </div>
 
+  <!-- reset password modal -->
+  <div id="reset-modal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 hidden" onclick="if(event.target===this)hideModal('reset')">
+    <form onsubmit="resetPassword(event)" class="bg-surface border border-border rounded-xl p-6 w-96 flex flex-col gap-4">
+      <h3 class="text-accent font-bold text-sm">reset password</h3>
+      <p id="reset-email-label" class="text-muted text-xs"></p>
+      <input id="reset-password" type="password" placeholder="new password" required minlength="8"
+        class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+      <input id="reset-confirm" type="password" placeholder="confirm password" required
+        class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-accent">
+      <input type="hidden" id="reset-user-id">
+      <div class="flex gap-2 justify-end">
+        <button type="button" onclick="hideModal('reset')"
+          class="text-muted text-xs px-3 py-1.5 rounded border border-border cursor-pointer hover:text-gray-200 font-mono">cancel</button>
+        <button type="submit"
+          class="bg-accent text-black text-xs px-4 py-1.5 rounded font-bold cursor-pointer font-mono">reset</button>
+      </div>
+    </form>
+  </div>
+
   <!-- impersonation banner -->
   <div id="imp-banner" class="fixed top-0 left-0 right-0 bg-yellow-500/20 border-b border-yellow-500/50 text-yellow-400 text-xs text-center py-1.5 z-50 hidden font-mono">
     viewing as <span id="imp-email"></span>
@@ -138,6 +157,7 @@ function render(users) {
       <td class="py-2.5 text-muted text-xs">${u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : '—'}</td>
       <td class="py-2.5 text-right space-x-2">
         ${canEdit ? `<button onclick='editUser(${JSON.stringify(u).replace(/'/g, "&#39;")})' class="text-muted text-xs hover:text-gray-200 cursor-pointer">edit</button>` : ''}
+        ${isAdmin && !isMe ? `<button onclick='showResetModal("${u.id}", "${u.email}")' class="text-muted text-xs hover:text-orange-400 cursor-pointer">reset pw</button>` : ''}
         ${isAdmin && !isMe ? `<button onclick='impersonate("${u.id}")' class="text-muted text-xs hover:text-yellow-400 cursor-pointer">impersonate</button>` : ''}
         ${isAdmin && !isMe ? `<button onclick='deleteUser("${u.id}")' class="text-muted text-xs hover:text-red-400 cursor-pointer">delete</button>` : ''}
       </td>
@@ -228,6 +248,28 @@ function exitImpersonation() {
     localStorage.removeItem('upend_real_token');
     window.location.reload();
   }
+}
+
+function showResetModal(userId, email) {
+  document.getElementById('reset-user-id').value = userId;
+  document.getElementById('reset-email-label').textContent = email;
+  document.getElementById('reset-password').value = '';
+  document.getElementById('reset-confirm').value = '';
+  showModal('reset');
+}
+
+async function resetPassword(e) {
+  e.preventDefault();
+  const newPassword = document.getElementById('reset-password').value;
+  const confirm = document.getElementById('reset-confirm').value;
+  if (newPassword !== confirm) { alert('passwords do not match'); return; }
+  const userId = document.getElementById('reset-user-id').value;
+  const res = await api('/services/users/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId, new_password: newPassword }),
+  });
+  if (res.ok) { hideModal('reset'); }
+  else { const err = await res.json(); alert(err.error || 'reset failed'); }
 }
 
 load();

@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>upend</title>
+  <link rel="icon" type="image/svg+xml" href="/upend-logo.svg">
+  <link rel="icon" type="image/png" href="/upend-logo.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -77,7 +79,7 @@
   <div class="flex items-center gap-3">
     <button @click="drawerOpen = !drawerOpen; if(drawerOpen) loadSessions()"
       class="text-lg px-2 py-1 rounded text-muted hover:text-gray-200 hover:bg-border cursor-pointer">☰</button>
-    <span class="text-accent font-bold text-sm cursor-pointer" @click="rightPanel = 'home'">upend</span>
+    <img src="/upend-logo.svg" alt="upend" class="h-5 cursor-pointer" @click="rightPanel = 'home'">
     <div class="flex gap-0.5">
       <button @click="rightPanel = 'data'"
         :class="rightPanel === 'data' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"

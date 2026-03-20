@@ -6,9 +6,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=upend
+User=ec2-user
 WorkingDirectory=/opt/upend
-ExecStart=/usr/local/bin/dotenvx run -- /usr/local/bin/bun services/%i/index.ts
+EnvironmentFile=/opt/upend/.env
+ExecStart=/usr/local/bin/bun services/%i/index.ts
 Restart=always
 RestartSec=2
 Environment=NODE_ENV=production

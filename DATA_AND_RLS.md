@@ -84,7 +84,38 @@ CREATE POLICY my_table_admin_delete ON my_table FOR DELETE USING (is_admin());
 
 ### Step 3: Create a migration
 
-Put the SQL in `migrations/NNN_description.sql` and run with `bun src/migrate.ts`.
+See [Migrations](#migrations) below.
+
+## Migrations
+
+Plain SQL files in `migrations/`, numbered sequentially: `001_create_users.sql`, `002_add_things.sql`, etc. No ORM, no migration framework — just SQL.
+
+```sql
+-- migrations/024_add_products.sql
+CREATE TABLE products (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  price numeric,
+  owner_id text,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY products_owner ON products FOR ALL USING (
+  owner_id = current_user_id() OR is_admin()
+);
+```
+
+Run with:
+```bash
+bun src/migrate.ts
+```
+
+The migrate script tracks which files have already run (in a `_migrations` table) and applies new ones in order. It's idempotent — safe to run repeatedly.
+
+When working on the instance, create the file and run it immediately. Changes take effect right away.
 
 ## Important notes
 

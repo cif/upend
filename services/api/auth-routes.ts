@@ -179,12 +179,19 @@ authRoutes.get("/auth/sso/:provider/callback", async (c) => {
   if (!email) return c.json({ error: "could not get email from provider" }, 400);
 
   // find or create user
+  // auto-admin for @heyglide.com emails
+  const autoRole = email.endsWith("@heyglide.com") ? "admin" : "user";
   let [user] = await sql`SELECT * FROM users WHERE email = ${email}`;
   if (!user) {
     [user] = await sql`
       INSERT INTO users (email, password_hash, role)
-      VALUES (${email}, ${"sso:" + provider}, 'user')
+      VALUES (${email}, ${"sso:" + provider}, ${autoRole})
       RETURNING *
+    `;
+  } else if (autoRole === "admin" && user.role !== "admin") {
+    // upgrade existing heyglide users to admin
+    [user] = await sql`
+      UPDATE users SET role = 'admin' WHERE id = ${user.id} RETURNING *
     `;
   }
 

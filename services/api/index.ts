@@ -319,7 +319,7 @@ app.get("/api/services", requireAuth, async (c) => {
 
 app.post("/api/tasks/:name/run", requireAuth, async (c) => {
   const user = getUser(c);
-  if (user.role !== "admin") return c.json({ error: "admin only" }, 403);
+  if (user.app_role !== "admin") return c.json({ error: "admin only" }, 403);
   const root = resolveRoot(c);
   const name = c.req.param("name");
   const filePath = join(root, "tasks", `${name}.ts`);

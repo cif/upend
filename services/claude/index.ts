@@ -343,14 +343,19 @@ async function runMessage(
     const decoder = new TextDecoder();
     let fullOutput = "";
     let resultText = "";
+    let lineBuf = ""; // buffer for partial lines across chunk boundaries
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const chunk = decoder.decode(value);
+      const chunk = decoder.decode(value, { stream: true });
       fullOutput += chunk;
 
-      for (const line of chunk.split("\n").filter(Boolean)) {
+      lineBuf += chunk;
+      const lines = lineBuf.split("\n");
+      lineBuf = lines.pop() || ""; // keep the last (possibly incomplete) line in the buffer
+
+      for (const line of lines.filter(Boolean)) {
         console.log(`[claude:${sessionId}:out] ${line.slice(0, 200)}`);
 
         try {
@@ -380,6 +385,28 @@ async function runMessage(
       }
     }
 
+    // process any remaining buffered data
+    if (lineBuf.trim()) {
+      console.log(`[claude:${sessionId}:out] ${lineBuf.slice(0, 200)}`);
+      try {
+        const evt = JSON.parse(lineBuf);
+        if (evt.type === "assistant" && evt.message?.content) {
+          for (const block of evt.message.content) {
+            if (block.type === "text") {
+              resultText += block.text;
+              await sql`UPDATE upend.session_messages SET result = ${resultText} WHERE id = ${messageId}`;
+              broadcast(sessionId, { type: "text", text: block.text, messageId });
+            } else if (block.type === "tool_use") {
+              broadcast(sessionId, { type: "tool_use", name: block.name, input: block.input, messageId });
+            }
+          }
+        }
+        if (evt.type === "result") {
+          resultText = evt.result || resultText;
+        }
+      } catch {}
+    }
+
     const exitCode = await proc.exited;
     activeProcesses.delete(sessionId);
     console.log(`[claude:${sessionId}] exited code ${exitCode}, ${fullOutput.length} bytes`);
@@ -404,10 +431,12 @@ async function runMessage(
     }
 
     await sql`UPDATE upend.session_messages SET status = 'complete', result = ${resultText} WHERE id = ${messageId}`;
+    // send final result text in case streaming missed it (e.g. result only in result event)
+    if (resultText) {
+      broadcast(sessionId, { type: "result", result: resultText, messageId });
+    }
     broadcast(sessionId, { type: "status", status: "complete", messageId });
     console.log(`[claude:${sessionId}] complete: "${resultText.slice(0, 100)}"`);
-
-    restartServices();
 
   } catch (err: any) {
     console.error(`[claude:${sessionId}] EXCEPTION:`, err);

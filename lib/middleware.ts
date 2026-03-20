@@ -29,7 +29,8 @@ export const requireAuth = createMiddleware<{
     const user = {
       sub: payload.sub as string,
       email: payload.email as string,
-      role: (payload.app_role as string) || (payload.role as string) || "user",
+      role: (payload.role as string) || "authenticated",
+      app_role: (payload.app_role as string) || "user",
     };
     console.log(`[auth] ${user.email} → ${method} ${path}`);
     c.set("user", user);
@@ -45,8 +46,8 @@ export const requireRole = (...roles: string[]) =>
   createMiddleware(async (c, next) => {
     const user = c.get("user") as AuthPayload | undefined;
     if (!user) return c.json({ error: "not authenticated" }, 401);
-    if (!roles.includes(user.role)) {
-      console.log(`[auth] 403 forbidden: ${user.email} needs ${roles.join("|")}, has ${user.role}`);
+    if (!roles.includes(user.role) && !roles.includes((user as any).app_role)) {
+      console.log(`[auth] 403 forbidden: ${user.email} needs ${roles.join("|")}, has role=${user.role} app_role=${(user as any).app_role}`);
       return c.json({ error: "forbidden" }, 403);
     }
     await next();

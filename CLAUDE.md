@@ -98,26 +98,41 @@ The data API sets `request.jwt.sub`, `request.jwt.role`, `request.jwt.email` as 
 - `GET /api/auth/sso/:provider` — OAuth/SSO login
 - `GET /.well-known/jwks.json` — public keys for JWT verification
 
-## Data API (Neon PostgREST)
-User-facing data access goes through Neon's Data API, available at the `NEON_DATA_API` env var.
+## Data API
 
-The Data API URL is: `process.env.NEON_DATA_API` (PostgREST)
+User-facing data CRUD goes through `/api/data/:table` (GET, POST, PATCH, DELETE). PostgREST-style filters: `?field=eq.value`, `?order=created_at.desc`, `?limit=10`.
 
-It auto-generates REST endpoints for every table in the `public` schema:
-- `GET /<table>` — list rows (supports ?select=, ?order=, ?limit=, filters)
-- `GET /<table>?id=eq.5` — filter rows
-- `POST /<table>` — insert (JSON body, returns row with Prefer: return=representation)
-- `PATCH /<table>?id=eq.5` — update matching rows
-- `DELETE /<table>?id=eq.5` — delete matching rows
-- `GET /` — OpenAPI spec (auto-generated from schema)
+Filter operators: eq, neq, gt, gte, lt, lte, like, ilike, is, in, not
+Example: `GET /api/data/things?name=ilike.*widget*&order=created_at.desc&limit=10`
 
-PostgREST filter operators: eq, neq, gt, gte, lt, lte, like, ilike, is, in, not
-Example: `GET /things?name=ilike.*widget*&order=created_at.desc&limit=10`
+All requests need `Authorization: Bearer <jwt>`. The JWT contains `sub` (user id), `email`, `role` (postgres role), and `app_role` (user/admin).
 
-All requests need: `Authorization: Bearer <jwt>` and `apikey: <anon-key>` headers.
-The JWT comes from our auth endpoints. The JWT contains `sub` (user id), `email`, `role` (postgres role), and `app_role` (user/admin).
+## Row-Level Security (RLS)
 
-No RLS policies are set by default — the user defines access control as needed, either via SQL RLS policies or app-level logic. When the user asks you to add access control, help them decide whether SQL-level RLS or app-level checks are the better fit for their use case.
+**Full documentation: see `DATA_AND_RLS.md`**
+
+RLS is enforced on all data API queries via `withRLS()` which drops to the `authenticated` role and sets JWT session variables.
+
+Three SQL helper functions are available for writing policies:
+- `current_user_id()` — the authenticated user's ID
+- `current_user_role()` — `'admin'` or `'user'`
+- `is_admin()` — shorthand for admin check
+
+When creating tables that need access control:
+```sql
+-- In a migration file
+ALTER TABLE my_table ENABLE ROW LEVEL SECURITY;
+ALTER TABLE my_table FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY my_table_select ON my_table FOR SELECT USING (
+  owner_id = current_user_id() OR is_admin()
+);
+```
+
+**IMPORTANT:**
+- Always use `current_user_id()` and `is_admin()` — do NOT use `auth.user_id()` or `auth.jwt()` (they don't work)
+- Always include `FORCE ROW LEVEL SECURITY` (required because the DB connection role has BYPASSRLS)
+- Tables with `owner_id` should set it on insert from the JWT sub claim
 
 ## Building CRUD apps
 

@@ -77,19 +77,25 @@
 <!-- top bar -->
 <div x-show="token" class="h-10 bg-surface border-b border-border flex items-center justify-between px-3 shrink-0 z-40">
   <div class="flex items-center gap-3">
-    <button @click="drawerOpen = !drawerOpen; if(drawerOpen) loadSessions()"
+    <button x-show="isAdmin" @click="drawerOpen = !drawerOpen; if(drawerOpen) loadSessions()"
       class="text-lg px-2 py-1 rounded text-muted hover:text-gray-200 hover:bg-border cursor-pointer">☰</button>
     <img src="/upend-logo.svg" alt="upend" class="h-5 cursor-pointer" @click="rightPanel = 'home'">
     <div class="flex gap-0.5">
-      <button @click="rightPanel = 'data'"
-        :class="rightPanel === 'data' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
-        class="px-3 py-1 text-xs rounded cursor-pointer font-mono">data</button>
-      <button @click="rightPanel = 'tasks'; loadTasks()"
-        :class="rightPanel === 'tasks' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
-        class="px-3 py-1 text-xs rounded cursor-pointer font-mono">tasks</button>
-      <button @click="rightPanel = 'audit'; loadAuditLog()"
-        :class="rightPanel === 'audit' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
-        class="px-3 py-1 text-xs rounded cursor-pointer font-mono">audit</button>
+      <template x-if="isAdmin">
+        <button @click="rightPanel = 'data'"
+          :class="rightPanel === 'data' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
+          class="px-3 py-1 text-xs rounded cursor-pointer font-mono">data</button>
+      </template>
+      <template x-if="isAdmin">
+        <button @click="rightPanel = 'tasks'; loadTasks(); loadServices()"
+          :class="rightPanel === 'tasks' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
+          class="px-3 py-1 text-xs rounded cursor-pointer font-mono">workloads</button>
+      </template>
+      <template x-if="isAdmin">
+        <button @click="rightPanel = 'audit'; loadAuditLog()"
+          :class="rightPanel === 'audit' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
+          class="px-3 py-1 text-xs rounded cursor-pointer font-mono">audit</button>
+      </template>
       <div class="relative" @click.away="appsOpen = false">
         <button @click="appsOpen = !appsOpen; loadApps()"
           :class="rightPanel !== 'data' && rightPanel !== 'home' ? 'text-accent bg-accent-dim' : 'text-muted hover:text-gray-200 hover:bg-border'"
@@ -279,7 +285,7 @@
 <!-- main panels -->
 <div x-show="token" class="flex-1 flex min-h-0">
   <!-- left: chat (native DOM) -->
-  <div class="flex flex-col min-h-0 min-w-0" id="panel-left" style="flex: 0 0 550px;">
+  <div x-show="isAdmin" class="flex flex-col min-h-0 min-w-0" id="panel-left" style="flex: 0 0 550px;">
     <!-- messages -->
     <div class="flex-1 overflow-y-auto px-5 py-4 space-y-4 no-scrollbar" x-ref="messages">
       <template x-for="(msg, i) in messages" :key="i">
@@ -350,7 +356,7 @@
   </div>
 
   <!-- resizer -->
-  <div class="w-1 bg-border cursor-col-resize shrink-0 hover:bg-accent"
+  <div x-show="isAdmin" class="w-1 bg-border cursor-col-resize shrink-0 hover:bg-accent"
     @mousedown="startResize($event)"></div>
 
   <!-- right panel -->
@@ -456,7 +462,7 @@
       </div>
 
       <template x-for="wf in tasksList" :key="wf.name">
-        <div class="px-4 py-3 border-b border-border/50 hover:bg-surface/50">
+        <div class="px-4 py-3 border-b hover:bg-surface/50" style="border-color: color-mix(in srgb, var(--c-border) 40%, transparent)">
           <div class="flex items-center justify-between mb-1">
             <div class="flex items-center gap-2">
               <span class="text-sm font-mono text-gray-200" x-text="wf.name"></span>
@@ -474,6 +480,35 @@
           </div>
           <p x-show="wf.description" class="text-xs text-muted" x-text="wf.description"></p>
           <pre x-show="wf._output" class="mt-2 text-[11px] text-gray-400 bg-bg rounded p-2 overflow-x-auto font-mono max-h-32 overflow-y-auto" x-text="wf._output"></pre>
+        </div>
+      </template>
+
+      <!-- services section -->
+      <div class="px-4 py-3 border-b border-border border-t flex items-center justify-between">
+        <span class="text-sm font-bold text-gray-200 font-mono">services</span>
+      </div>
+      <div x-show="servicesList.length === 0" class="p-8 text-center text-muted text-sm">
+        no custom services
+      </div>
+      <template x-for="svc in servicesList" :key="svc.name">
+        <div class="px-4 py-3 border-b hover:bg-surface/50" style="border-color: color-mix(in srgb, var(--c-border) 40%, transparent)">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-sm font-mono text-gray-200" x-text="svc.name"></span>
+            <span x-show="svc.source === 'session'" class="text-[10px] text-yellow-400 bg-yellow-500/10 px-1.5 py-0.5 rounded font-mono">session</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <template x-for="r in svc.routes" :key="r.method + r.path">
+              <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-border"
+                :class="{
+                  [darkMode ? 'text-green-400' : 'text-green-700']: r.method === 'GET',
+                  [darkMode ? 'text-blue-400' : 'text-blue-700']: r.method === 'POST',
+                  [darkMode ? 'text-yellow-400' : 'text-yellow-700']: r.method === 'PATCH',
+                  [darkMode ? 'text-red-400' : 'text-red-600']: r.method === 'DELETE',
+                  'text-muted': !['GET','POST','PATCH','DELETE'].includes(r.method)
+                }"
+                x-text="r.method + ' ' + r.path"></span>
+            </template>
+          </div>
         </div>
       </template>
     </div>
@@ -754,6 +789,7 @@ function dashboard() {
     allPolicies: [],
     allRLSTables: [],
     tasksList: [],
+    servicesList: [],
     auditEntries: [],
     attachments: [],
     rightPanel: 'home',
@@ -776,6 +812,10 @@ function dashboard() {
 
     // resizer state
     _resizing: false,
+
+    get isAdmin() {
+      try { return JSON.parse(atob(this.token?.split('.')[1] || '')).app_role === 'admin'; } catch { return false; }
+    },
 
     get viewAsLabel() {
       if (!this.viewAsUserId) return '';
@@ -823,7 +863,7 @@ function dashboard() {
         if (sessionMatch) {
           this.openSessionByName(sessionMatch[1]);
         } else if (path === '/tasks') {
-          this.rightPanel = 'tasks'; this.loadTasks();
+          this.rightPanel = 'tasks'; this.loadTasks(); this.loadServices();
         } else if (path === '/audit') {
           this.rightPanel = 'audit'; this.loadAuditLog();
         } else if (dataMatch) {
@@ -858,6 +898,15 @@ function dashboard() {
           const ctx = typeof s?.context === 'string' ? JSON.parse(s.context) : s?.context;
           const name = ctx?.worktree || s?.snapshotName;
           if (name) history.replaceState(null, '', `/session/${name}`);
+        }
+      });
+
+      // sync session cookie so iframe app requests route to the worktree
+      this.$watch('currentWorktree', (wt) => {
+        if (wt) {
+          document.cookie = `upend_session=${wt}; path=/; SameSite=Lax`;
+        } else {
+          document.cookie = 'upend_session=; path=/; max-age=0';
         }
       });
 
@@ -898,7 +947,7 @@ function dashboard() {
       if (sessionMatch) {
         this.openSessionByName(sessionMatch[1]);
       } else if (path === '/tasks') {
-        this.rightPanel = 'tasks'; this.loadTasks();
+        this.rightPanel = 'tasks'; this.loadTasks(); this.loadServices();
       } else if (path === '/audit') {
         this.rightPanel = 'audit'; this.loadAuditLog();
       } else if (dataMatch) {
@@ -1344,7 +1393,7 @@ function dashboard() {
             // refresh everything
             this.refreshRightPanel();
             this.loadApps();
-            this.loadTasks();
+            this.loadTasks(); this.loadServices();
           } else if (data.status === 'error') {
             this.assistantBuffer = '';
             this.isRunning = false;
@@ -1667,6 +1716,13 @@ function dashboard() {
       try {
         const res = await this.authFetch('/api/tasks');
         if (res.ok) this.tasksList = (await res.json()).map(w => ({ ...w, _running: false, _result: undefined, _output: '' }));
+      } catch {}
+    },
+
+    async loadServices() {
+      try {
+        const res = await this.authFetch('/api/services');
+        if (res.ok) this.servicesList = await res.json();
       } catch {}
     },
 

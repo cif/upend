@@ -15,7 +15,9 @@ const SESSIONS_DIR = join(PROJECT_ROOT, "sessions");
 
 // session-aware path resolver
 function resolveRoot(c: any): string {
-  const session = c.req.header("X-Upend-Session") || c.req.query("_session");
+  const session = c.req.header("X-Upend-Session")
+    || c.req.query("_session")
+    || c.req.header("Cookie")?.match(/upend_session=([^;]+)/)?.[1];
   if (session && session !== "main") {
     const sessionPath = join(SESSIONS_DIR, session);
     if (existsSync(sessionPath)) return sessionPath;
@@ -34,14 +36,17 @@ export async function audit(action: string, opts: { actorId?: string; actorEmail
 }
 
 function getUser(c: any) {
-  return c.get("user") as { sub: string; email: string; role: string };
+  return c.get("user") as { sub: string; email: string; role: string; app_role?: string };
 }
 
-async function withRLS<T>(user: { sub: string; email: string; role: string }, fn: (sql: any) => Promise<T>): Promise<T> {
+async function withRLS<T>(user: { sub: string; email: string; role: string; app_role?: string }, fn: (sql: any) => Promise<T>): Promise<T> {
   return sql.begin(async (tx) => {
+    // drop to 'authenticated' role so RLS is enforced (neondb_owner has BYPASSRLS)
+    await tx.unsafe(`SET LOCAL role = 'authenticated'`);
     await tx.unsafe(`SET LOCAL request.jwt.sub = '${user.sub}'`);
     await tx.unsafe(`SET LOCAL request.jwt.role = '${user.role}'`);
     await tx.unsafe(`SET LOCAL request.jwt.email = '${user.email}'`);
+    await tx.unsafe(`SET LOCAL request.jwt.app_role = '${user.app_role || user.role}'`);
     return fn(tx);
   });
 }
@@ -230,6 +235,38 @@ app.get("/api/tasks", requireAuth, async (c) => {
     }
   }
   return c.json(tasks);
+});
+
+// services introspection
+app.get("/api/services", requireAuth, async (c) => {
+  const root = resolveRoot(c);
+  const seen = new Set<string>();
+  const services: any[] = [];
+  const skip = new Set(["api", "claude", "dashboard"]); // framework services
+  for (const base of [root, PROJECT_ROOT]) {
+    const servicesDir = join(base, "services");
+    let dirs: string[];
+    try { dirs = readdirSync(servicesDir).filter(d => !skip.has(d) && existsSync(join(servicesDir, d, "index.ts"))); } catch { continue; }
+    for (const name of dirs) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const entryPath = join(servicesDir, name, "index.ts");
+      const content = readFileSync(entryPath, "utf-8");
+      // extract route definitions: app.get("/path", ...), app.post("/path", ...), etc.
+      const routes: { method: string; path: string }[] = [];
+      const routeRegex = /app\.(get|post|put|patch|delete|all)\s*\(\s*["'`]([^"'`]+)["'`]/gi;
+      let match;
+      while ((match = routeRegex.exec(content)) !== null) {
+        routes.push({ method: match[1].toUpperCase(), path: `/services/${name}${match[2]}` });
+      }
+      services.push({
+        name,
+        routes,
+        source: base === root && root !== PROJECT_ROOT ? "session" : "main",
+      });
+    }
+  }
+  return c.json(services);
 });
 
 app.post("/api/tasks/:name/run", requireAuth, async (c) => {

@@ -59,6 +59,54 @@ app.use("*", cors());
 
 app.get("/api/health", (c) => c.json({ service: "api", status: "up", ts: Date.now() }));
 
+// system metrics (memory, swap, load, disk, top processes)
+app.get("/api/system", requireAuth, async (c) => {
+  const { execSync } = await import("child_process");
+  const run = (cmd: string) => execSync(cmd, { encoding: "utf-8" }).trim();
+
+  // parse /proc/meminfo
+  const meminfo = run("cat /proc/meminfo");
+  const mem = (key: string) => {
+    const m = meminfo.match(new RegExp(`${key}:\\s+(\\d+)`));
+    return m ? Number(m[1]) * 1024 : 0; // convert KB to bytes
+  };
+  const memTotal = mem("MemTotal");
+  const memAvailable = mem("MemAvailable");
+  const swapTotal = mem("SwapTotal");
+  const swapFree = mem("SwapFree");
+
+  // load average
+  const loadavg = run("cat /proc/loadavg").split(" ");
+
+  // disk
+  const dfLine = run("df -B1 / | tail -1").split(/\s+/);
+
+  // uptime
+  const uptimeSecs = parseFloat(run("cat /proc/uptime").split(" ")[0]);
+
+  // top processes by memory
+  const psOut = run("ps aux --sort=-%mem | head -8").split("\n").slice(1);
+  const topProcs = psOut.map(line => {
+    const cols = line.split(/\s+/);
+    return { user: cols[0], pid: cols[1], cpu: parseFloat(cols[2]), mem: parseFloat(cols[3]), rss: Number(cols[5]) * 1024, command: cols.slice(10).join(" ").slice(0, 80) };
+  });
+
+  // check for recent OOM kills
+  let oomKills: string[] = [];
+  try { oomKills = run("dmesg --time-format iso 2>/dev/null | grep -i 'oom-kill\\|out of memory' | tail -5").split("\n").filter(Boolean); } catch {}
+
+  return c.json({
+    memory: { total: memTotal, available: memAvailable, used: memTotal - memAvailable, usedPct: Math.round((1 - memAvailable / memTotal) * 100) },
+    swap: { total: swapTotal, free: swapFree, used: swapTotal - swapFree, usedPct: swapTotal ? Math.round((1 - swapFree / swapTotal) * 100) : 0 },
+    load: { avg1: parseFloat(loadavg[0]), avg5: parseFloat(loadavg[1]), avg15: parseFloat(loadavg[2]) },
+    disk: { total: Number(dfLine[1]), used: Number(dfLine[2]), available: Number(dfLine[3]), usedPct: parseInt(dfLine[4]) },
+    uptime: uptimeSecs,
+    topProcesses: topProcs,
+    oomKills,
+    ts: Date.now(),
+  });
+});
+
 // JWKS at root (Neon fetches this)
 app.get("/.well-known/jwks.json", jwksHandler);
 
@@ -497,3 +545,5 @@ const port = Number(process.env.API_PORT) || 3001;
 console.log(`[api] running on :${port}`);
 
 export default { port, fetch: app.fetch };
+
+// This should not be appended — using sed instead

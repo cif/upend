@@ -396,6 +396,92 @@
             <p class="text-xs text-muted italic cursor-pointer hover:text-accent" @click="prompt = 'build me a CRUD app for managing products at apps/products'; $refs.chatInput.focus()">"build me a CRUD app for managing products"</p>
           </div>
         </div>
+        <!-- system metrics -->
+        <div x-show="isAdmin && systemMetrics" class="bg-surface border border-border rounded-lg p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-bold text-gray-200">system</h3>
+            <span class="text-[10px] text-muted" x-text="systemMetrics ? 'up ' + formatUptime(systemMetrics.uptime) : ''"></span>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <!-- memory -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[10px] text-muted uppercase tracking-wide">memory</span>
+                <span class="text-[10px] font-mono" :class="systemMetrics.memory.usedPct > 80 ? 'text-red-400' : systemMetrics.memory.usedPct > 60 ? 'text-yellow-400' : 'text-green-400'"
+                  x-text="systemMetrics.memory.usedPct + '%'"></span>
+              </div>
+              <div class="h-1.5 bg-border rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500"
+                  :class="systemMetrics.memory.usedPct > 80 ? 'bg-red-400' : systemMetrics.memory.usedPct > 60 ? 'bg-yellow-400' : 'bg-green-400'"
+                  :style="'width:' + systemMetrics.memory.usedPct + '%'"></div>
+              </div>
+              <div class="text-[10px] text-muted mt-0.5 font-mono" x-text="formatBytes(systemMetrics.memory.used) + ' / ' + formatBytes(systemMetrics.memory.total)"></div>
+            </div>
+            <!-- swap -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[10px] text-muted uppercase tracking-wide">swap</span>
+                <span class="text-[10px] font-mono" :class="systemMetrics.swap.usedPct > 50 ? 'text-yellow-400' : 'text-green-400'"
+                  x-text="systemMetrics.swap.usedPct + '%'"></span>
+              </div>
+              <div class="h-1.5 bg-border rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500"
+                  :class="systemMetrics.swap.usedPct > 50 ? 'bg-yellow-400' : 'bg-green-400'"
+                  :style="'width:' + systemMetrics.swap.usedPct + '%'"></div>
+              </div>
+              <div class="text-[10px] text-muted mt-0.5 font-mono" x-text="formatBytes(systemMetrics.swap.used) + ' / ' + formatBytes(systemMetrics.swap.total)"></div>
+            </div>
+            <!-- disk -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[10px] text-muted uppercase tracking-wide">disk</span>
+                <span class="text-[10px] font-mono" :class="systemMetrics.disk.usedPct > 80 ? 'text-red-400' : 'text-green-400'"
+                  x-text="systemMetrics.disk.usedPct + '%'"></span>
+              </div>
+              <div class="h-1.5 bg-border rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500"
+                  :class="systemMetrics.disk.usedPct > 80 ? 'bg-red-400' : 'bg-green-400'"
+                  :style="'width:' + systemMetrics.disk.usedPct + '%'"></div>
+              </div>
+              <div class="text-[10px] text-muted mt-0.5 font-mono" x-text="formatBytes(systemMetrics.disk.used) + ' / ' + formatBytes(systemMetrics.disk.total)"></div>
+            </div>
+            <!-- load -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[10px] text-muted uppercase tracking-wide">load avg</span>
+              </div>
+              <div class="text-sm font-mono text-gray-200" x-text="systemMetrics.load.avg1.toFixed(2) + '  ' + systemMetrics.load.avg5.toFixed(2) + '  ' + systemMetrics.load.avg15.toFixed(2)"></div>
+              <div class="text-[10px] text-muted mt-0.5">1m / 5m / 15m</div>
+            </div>
+          </div>
+          <!-- top processes -->
+          <div class="mt-3 border-t border-border pt-2">
+            <span class="text-[10px] text-muted uppercase tracking-wide">top processes</span>
+            <div class="mt-1 space-y-0.5">
+              <template x-for="p in systemMetrics.topProcesses.slice(0, 5)" :key="p.pid">
+                <div class="flex items-center justify-between text-[10px] font-mono">
+                  <span class="text-muted truncate max-w-[60%]" x-text="p.command"></span>
+                  <span class="flex gap-3">
+                    <span class="text-muted" x-text="formatBytes(p.rss)"></span>
+                    <span :class="p.mem > 10 ? 'text-yellow-400' : 'text-muted'" x-text="p.mem.toFixed(1) + '%'"></span>
+                  </span>
+                </div>
+              </template>
+            </div>
+          </div>
+          <!-- OOM kills -->
+          <template x-if="systemMetrics.oomKills && systemMetrics.oomKills.length > 0">
+            <div class="mt-3 border-t border-border pt-2">
+              <span class="text-[10px] text-red-400 uppercase tracking-wide font-bold">recent OOM kills</span>
+              <div class="mt-1 space-y-0.5">
+                <template x-for="oom in systemMetrics.oomKills" :key="oom">
+                  <div class="text-[10px] text-red-400/80 font-mono truncate" x-text="oom"></div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
         <div class="bg-surface border border-border rounded-lg p-4">
           <h3 class="text-sm font-bold text-gray-200 mb-2">apps</h3>
           <template x-for="app in apps" :key="app.name">
@@ -798,6 +884,7 @@ function dashboard() {
     servicesList: [],
     auditEntries: [],
     attachments: [],
+    systemMetrics: null,
     rightPanel: 'home',
     dataSubTab: 'data',
     viewAsUsers: [],
@@ -861,6 +948,8 @@ function dashboard() {
         document.cookie = `upend_token=${this.token}; path=/; SameSite=Lax; max-age=86400`;
         this.loadApps();
         this.loadTables();
+        this.loadSystemMetrics();
+        setInterval(() => this.loadSystemMetrics(), 30000);
 
         // restore panel/session from URL
         const path = window.location.pathname;
@@ -1673,6 +1762,27 @@ function dashboard() {
         this.messages.push({ role: 'system', content: `CSV upload failed: ${err.message}` });
       }
       event.target.value = ''; // reset file input
+    },
+
+    async loadSystemMetrics() {
+      try {
+        const res = await this.authFetch('/api/system');
+        if (res?.ok) this.systemMetrics = await res.json();
+      } catch {}
+    },
+
+    formatBytes(bytes) {
+      if (!bytes) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(1024));
+      return (bytes / Math.pow(1024, i)).toFixed(i > 1 ? 1 : 0) + ' ' + units[i];
+    },
+
+    formatUptime(secs) {
+      const d = Math.floor(secs / 86400);
+      const h = Math.floor((secs % 86400) / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm';
     },
 
     async loadApps() {

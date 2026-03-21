@@ -124,7 +124,7 @@ app.post("/sessions", async (c) => {
 
   const [session] = await sql`
     INSERT INTO upend.editing_sessions (prompt, status, claude_session_id, snapshot_name, title, context)
-    VALUES (${prompt}, 'active', ${claudeSessionId}, ${sessionName}, ${title || null}, ${JSON.stringify({ root: worktree.path, worktree: sessionName, branch: worktree.branch })})
+    VALUES (${prompt}, 'active', ${claudeSessionId}, ${sessionName}, ${title || null}, ${JSON.stringify({ root: worktree.path, worktree: sessionName, branch: worktree.branch, userEmail: user.email, userId: user.sub })})
     RETURNING *
   `;
 

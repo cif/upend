@@ -319,7 +319,7 @@
             <div>
               <div class="text-xs font-bold uppercase tracking-wide mb-1"
                 :class="{ 'text-blue-500': msg.role === 'user', 'text-accent': msg.role === 'assistant', 'text-red-400': msg.role === 'error', 'text-muted': msg.role === 'system' }"
-                x-text="msg.role === 'error' ? 'error' : msg.role"></div>
+                x-text="msg.role === 'error' ? 'error' : msg.role === 'user' ? (sessionUserEmail || 'user') : msg.role"></div>
               <div class="text-sm leading-relaxed whitespace-pre-wrap break-words"
                 :class="msg.role === 'error' ? 'text-red-400/80' : ''"
                 x-text="msg.content"></div>
@@ -853,6 +853,8 @@ function dashboard() {
     currentSessionId: null,
     currentWorktree: null,
     sessionStatus: null,
+    sessionUserEmail: '',
+    pollTimer: null,
     drawerOpen: false,
 
     // modals
@@ -1207,7 +1209,8 @@ function dashboard() {
         const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
         // only use worktree for active sessions — closed/committed sessions show main
         this.currentWorktree = session.status === 'active' ? (ctx?.worktree || null) : null;
-                this.drawerOpen = false;
+        this.sessionUserEmail = ctx?.userEmail || '';
+        this.drawerOpen = false;
 
         // render messages
         this.messages = [];
@@ -1253,9 +1256,11 @@ function dashboard() {
     newSession() {
       this.currentSessionId = null; this.sessionStatus = null;
       this.currentWorktree = null;
+      this.sessionUserEmail = '';
       this.messages = [];
       this.drawerOpen = false;
       if (this.ws) { this.ws.close(); this.ws = null; }
+      this.stopPolling();
       this.setStatus('ready', 'ready');
       this.sessionTitle = '';
       this._pendingPrompt = '';
@@ -1429,7 +1434,8 @@ function dashboard() {
         this.currentSessionId = Number(data.session.id);
         this.sessionStatus = 'active';
         this.currentWorktree = data.worktree;
-                this.connectWS(this.currentSessionId);
+        this.sessionUserEmail = this.userEmail;
+        this.connectWS(this.currentSessionId);
         this.loadSessions();
         this.loadApps();
       } catch (err) {
@@ -1460,6 +1466,8 @@ function dashboard() {
       if (this._wsPing) { clearInterval(this._wsPing); this._wsPing = null; }
       this._wsSessionId = sessionId;
       this._wsRetries = 0;
+      // start polling as fallback — WS is unreliable
+      this.startPolling(sessionId);
 
       const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${wsProto}//${location.host}/claude/ws/${sessionId}?token=${encodeURIComponent(this.token)}`;
@@ -1519,6 +1527,7 @@ function dashboard() {
           if (data.status === 'complete') {
             this.assistantBuffer = '';
             this.isRunning = false;
+            this.stopPolling();
             this.setStatus('done', 'done');
             // mark streaming message as final
             const last = this.messages[this.messages.length - 1];
@@ -1530,6 +1539,7 @@ function dashboard() {
           } else if (data.status === 'error') {
             this.assistantBuffer = '';
             this.isRunning = false;
+            this.stopPolling();
             this.setStatus('error', 'error');
             this.messages.push({ role: 'system', content: `claude error: ${data.error || 'unknown'}\n\nsend another message to retry, or start a new session.` });
             this.scrollToBottom();
@@ -1559,6 +1569,78 @@ function dashboard() {
           this.setStatus('error', 'disconnected');
         }
       };
+    },
+
+    // ---------- message polling (fallback for unreliable WebSocket) ----------
+
+    startPolling(sessionId) {
+      this.stopPolling();
+      this.pollTimer = setInterval(() => this.pollMessages(sessionId), 3000);
+    },
+
+    stopPolling() {
+      if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    },
+
+    async pollMessages(sessionId) {
+      if (this.currentSessionId !== sessionId) { this.stopPolling(); return; }
+      try {
+        const res = await this.authFetch(`/claude/sessions/${sessionId}`);
+        if (!res.ok) return;
+        const session = await res.json();
+        if (!session.messages?.length) return;
+
+        const lastMsg = session.messages[session.messages.length - 1];
+
+        // update session user email if not set
+        if (!this.sessionUserEmail) {
+          const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
+          if (ctx?.userEmail) this.sessionUserEmail = ctx.userEmail;
+        }
+
+        // rebuild messages from DB state — only if we have new data
+        // compare: count completed DB messages vs what we have rendered
+        const dbComplete = session.messages.filter(m => m.status === 'complete' || m.status === 'error').length;
+        const renderedAssistant = this.messages.filter(m => m.role === 'assistant' && !m._streaming).length
+          + this.messages.filter(m => m.role === 'error').length;
+
+        if (dbComplete > renderedAssistant) {
+          // we missed messages — rebuild from DB
+          this.messages = [];
+          for (const msg of session.messages) {
+            this.messages.push({ role: 'user', content: msg.content });
+            if (msg.result) {
+              this.messages.push({
+                role: msg.status === 'error' ? 'error' : 'assistant',
+                content: msg.result,
+              });
+            }
+          }
+          this.scrollToBottom();
+        }
+
+        // sync running state
+        if (lastMsg.status === 'complete' || lastMsg.status === 'error') {
+          if (this.isRunning) {
+            this.isRunning = false;
+            this.setStatus('done', 'done');
+            this.refreshRightPanel();
+            this.loadApps();
+            this.loadTasks(); this.loadServices();
+          }
+        } else if (lastMsg.status === 'running' && !this.isRunning) {
+          this.isRunning = true;
+          this.setStatus('running', 'claude is working...');
+        }
+
+        // stop polling if session is no longer active
+        if (session.status !== 'active') {
+          this.sessionStatus = session.status;
+          this.stopPolling();
+        }
+      } catch (err) {
+        console.error('[poll]', err);
+      }
     },
 
     // ---------- right panel ----------

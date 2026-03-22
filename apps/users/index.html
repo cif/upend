@@ -155,11 +155,13 @@ function render(users) {
       </td>
       <td class="py-2.5 text-muted text-xs">${new Date(u.createdAt).toLocaleDateString()}</td>
       <td class="py-2.5 text-muted text-xs">${u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : '—'}</td>
-      <td class="py-2.5 text-right space-x-2">
-        ${canEdit ? `<button onclick='editUser(${JSON.stringify(u).replace(/'/g, "&#39;")})' class="text-muted text-xs hover:text-gray-200 cursor-pointer">edit</button>` : ''}
-        ${isAdmin && !isMe ? `<button onclick='showResetModal("${u.id}", "${u.email}")' class="text-muted text-xs hover:text-orange-400 cursor-pointer">reset pw</button>` : ''}
-        ${isAdmin && !isMe ? `<button onclick='impersonate("${u.id}")' class="text-muted text-xs hover:text-yellow-400 cursor-pointer">impersonate</button>` : ''}
-        ${isAdmin && !isMe ? `<button onclick='deleteUser("${u.id}")' class="text-muted text-xs hover:text-red-400 cursor-pointer">delete</button>` : ''}
+      <td class="py-2.5 text-right">
+        <div class="flex items-center justify-end gap-1.5">
+          ${canEdit ? `<button onclick='editUser(${JSON.stringify(u).replace(/'/g, "&#39;")})' class="px-2.5 py-1 rounded text-xs font-mono bg-surface border border-border text-gray-300 hover:bg-white/10 hover:text-white cursor-pointer transition-colors">edit</button>` : ''}
+          ${isAdmin && !isMe ? `<button onclick='showResetModal("${u.id}", "${u.email}")' class="px-2.5 py-1 rounded text-xs font-mono bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 cursor-pointer transition-colors">reset pw</button>` : ''}
+          ${isAdmin && !isMe ? `<button onclick='impersonate("${u.id}")' class="px-2.5 py-1 rounded text-xs font-mono bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20 cursor-pointer transition-colors">impersonate</button>` : ''}
+          ${isAdmin && !isMe ? `<button onclick='deleteUser("${u.id}")' class="px-2.5 py-1 rounded text-xs font-mono bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 cursor-pointer transition-colors">delete</button>` : ''}
+        </div>
       </td>
     </tr>`;
   }).join('');

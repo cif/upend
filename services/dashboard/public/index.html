@@ -854,7 +854,7 @@ function dashboard() {
     currentWorktree: null,
     sessionStatus: null,
     sessionUserEmail: '',
-    pollTimer: null,
+    _evtSource: null,
     drawerOpen: false,
 
     // modals
@@ -873,7 +873,6 @@ function dashboard() {
     isRunning: false,
     status: 'ready',
     statusText: '',
-    ws: null,
     assistantBuffer: '',
 
     // right panel
@@ -1152,7 +1151,7 @@ function dashboard() {
       localStorage.removeItem('upend_token');
       localStorage.removeItem('upend_email');
             document.cookie = 'upend_token=; path=/; max-age=0';
-      if (this.ws) { this.ws.close(); this.ws = null; }
+      this.disconnectStream();
       this.messages = [];
       this.currentSessionId = null; this.sessionStatus = null;
     },
@@ -1259,8 +1258,7 @@ function dashboard() {
       this.sessionUserEmail = '';
       this.messages = [];
       this.drawerOpen = false;
-      if (this.ws) { this.ws.close(); this.ws = null; }
-      this.stopPolling();
+      this.disconnectStream();
       this.setStatus('ready', 'ready');
       this.sessionTitle = '';
       this._pendingPrompt = '';
@@ -1287,7 +1285,7 @@ function dashboard() {
       this.setStatus('ready', 'closed');
       this.currentSessionId = null; this.sessionStatus = null;
       this.currentWorktree = null;
-            if (this.ws) { this.ws.close(); this.ws = null; }
+      this.disconnectStream();
       this.loadSessions();
       this.loadApps();
     },
@@ -1331,7 +1329,7 @@ function dashboard() {
         const appShowing = this.rightPanel;
         this.currentSessionId = null; this.sessionStatus = null;
         this.currentWorktree = null;
-                if (this.ws) { this.ws.close(); this.ws = null; }
+        this.disconnectStream();
         this.loadSessions();
         // force iframe reload with cache bust after worktree clears
         this.$nextTick(() => {
@@ -1447,6 +1445,8 @@ function dashboard() {
     async sendMessage(text) {
       this.setStatus('running', 'sending...');
       try {
+        // connect SSE before sending so we don't miss events
+        this.connectWS(this.currentSessionId);
         const res = await this.authFetch(`/claude/sessions/${this.currentSessionId}/messages`, {
           method: 'POST',
           body: JSON.stringify({ prompt: text }),
@@ -1459,41 +1459,31 @@ function dashboard() {
       }
     },
 
-    // ---------- websocket ----------
+    // ---------- SSE stream (replaces WebSocket) ----------
 
     connectWS(sessionId) {
-      if (this.ws) { this.ws.close(); this.ws = null; }
-      if (this._wsPing) { clearInterval(this._wsPing); this._wsPing = null; }
-      this._wsSessionId = sessionId;
-      this._wsRetries = 0;
-      // start polling as fallback — WS is unreliable
-      this.startPolling(sessionId);
-
-      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProto}//${location.host}/claude/ws/${sessionId}?token=${encodeURIComponent(this.token)}`;
-      console.log('[ws] connecting:', wsUrl);
-      this.ws = new WebSocket(wsUrl);
+      // close existing connections
+      if (this._evtSource) { this._evtSource.close(); this._evtSource = null; }
       this.isRunning = true;
       this.assistantBuffer = '';
 
-      this.ws.onopen = () => {
-        console.log('[ws] connected');
-        this._wsRetries = 0;
+      const sseUrl = `/claude/sessions/${sessionId}/stream?token=${encodeURIComponent(this.token)}`;
+      console.log('[sse] connecting:', sseUrl);
+      const evtSource = new EventSource(sseUrl);
+      this._evtSource = evtSource;
+
+      evtSource.onopen = () => {
+        console.log('[sse] connected');
         this.setStatus('running', 'connected');
-        // keepalive ping every 25s to prevent proxy/idle timeouts
-        this._wsPing = setInterval(() => {
-          if (this.ws?.readyState === WebSocket.OPEN) this.ws.send('ping');
-        }, 25000);
       };
 
-      this.ws.onmessage = (e) => {
-        if (e.data === 'pong') return; // keepalive response
-
+      evtSource.onmessage = (e) => {
         const data = JSON.parse(e.data);
+
+        if (data.type === 'connected') return; // initial handshake
 
         if (data.type === 'text') {
           this.assistantBuffer += data.text;
-          // update or create the assistant message
           const last = this.messages[this.messages.length - 1];
           if (last?.role === 'assistant' && last._streaming) {
             last.content = this.assistantBuffer;
@@ -1504,7 +1494,6 @@ function dashboard() {
         }
 
         else if (data.type === 'tool_use') {
-          // end current streaming message, reset buffer for next text block
           const last = this.messages[this.messages.length - 1];
           if (last?._streaming) delete last._streaming;
           this.assistantBuffer = '';
@@ -1513,7 +1502,6 @@ function dashboard() {
         }
 
         else if (data.type === 'result' && data.result) {
-          // final result — ensure it shows even if streaming text events were missed
           const last = this.messages[this.messages.length - 1];
           if (last?.role === 'assistant') {
             last.content = data.result;
@@ -1527,19 +1515,15 @@ function dashboard() {
           if (data.status === 'complete') {
             this.assistantBuffer = '';
             this.isRunning = false;
-            this.stopPolling();
             this.setStatus('done', 'done');
-            // mark streaming message as final
             const last = this.messages[this.messages.length - 1];
             if (last?._streaming) delete last._streaming;
-            // refresh everything
             this.refreshRightPanel();
             this.loadApps();
             this.loadTasks(); this.loadServices();
           } else if (data.status === 'error') {
             this.assistantBuffer = '';
             this.isRunning = false;
-            this.stopPolling();
             this.setStatus('error', 'error');
             this.messages.push({ role: 'system', content: `claude error: ${data.error || 'unknown'}\n\nsend another message to retry, or start a new session.` });
             this.scrollToBottom();
@@ -1547,100 +1531,25 @@ function dashboard() {
             this.assistantBuffer = '';
             this.isRunning = true;
             this.setStatus('running', 'claude is working...');
-          }
-        }
-      };
-
-      this.ws.onclose = () => {
-        console.log('[ws] disconnected');
-        if (this._wsPing) { clearInterval(this._wsPing); this._wsPing = null; }
-        // auto-reconnect if we still have an active session
-        if (this.currentSessionId === sessionId && this.sessionStatus === 'active') {
-          this._wsRetries++;
-          const delay = Math.min(1000 * Math.pow(2, this._wsRetries - 1), 15000);
-          console.log(`[ws] reconnecting in ${delay}ms (attempt ${this._wsRetries})`);
-          this.setStatus('running', 'reconnecting...');
-          setTimeout(() => {
-            if (this.currentSessionId === sessionId && this.sessionStatus === 'active') {
-              this.connectWS(sessionId);
-            }
-          }, delay);
-        } else if (this.isRunning) {
-          this.setStatus('error', 'disconnected');
-        }
-      };
-    },
-
-    // ---------- message polling (fallback for unreliable WebSocket) ----------
-
-    startPolling(sessionId) {
-      this.stopPolling();
-      this.pollTimer = setInterval(() => this.pollMessages(sessionId), 3000);
-    },
-
-    stopPolling() {
-      if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
-    },
-
-    async pollMessages(sessionId) {
-      if (this.currentSessionId !== sessionId) { this.stopPolling(); return; }
-      try {
-        const res = await this.authFetch(`/claude/sessions/${sessionId}`);
-        if (!res.ok) return;
-        const session = await res.json();
-        if (!session.messages?.length) return;
-
-        const lastMsg = session.messages[session.messages.length - 1];
-
-        // update session user email if not set
-        if (!this.sessionUserEmail) {
-          const ctx = typeof session.context === 'string' ? JSON.parse(session.context) : session.context;
-          if (ctx?.userEmail) this.sessionUserEmail = ctx.userEmail;
-        }
-
-        // rebuild messages from DB state — only if we have new data
-        // compare: count completed DB messages vs what we have rendered
-        const dbComplete = session.messages.filter(m => m.status === 'complete' || m.status === 'error').length;
-        const renderedAssistant = this.messages.filter(m => m.role === 'assistant' && !m._streaming).length
-          + this.messages.filter(m => m.role === 'error').length;
-
-        if (dbComplete > renderedAssistant) {
-          // we missed messages — rebuild from DB
-          this.messages = [];
-          for (const msg of session.messages) {
-            this.messages.push({ role: 'user', content: msg.content });
-            if (msg.result) {
-              this.messages.push({
-                role: msg.status === 'error' ? 'error' : 'assistant',
-                content: msg.result,
-              });
-            }
-          }
-          this.scrollToBottom();
-        }
-
-        // sync running state
-        if (lastMsg.status === 'complete' || lastMsg.status === 'error') {
-          if (this.isRunning) {
+          } else if (data.status === 'killed') {
+            this.assistantBuffer = '';
             this.isRunning = false;
-            this.setStatus('done', 'done');
-            this.refreshRightPanel();
-            this.loadApps();
-            this.loadTasks(); this.loadServices();
+            this.setStatus('done', 'killed');
           }
-        } else if (lastMsg.status === 'running' && !this.isRunning) {
-          this.isRunning = true;
-          this.setStatus('running', 'claude is working...');
         }
+      };
 
-        // stop polling if session is no longer active
-        if (session.status !== 'active') {
-          this.sessionStatus = session.status;
-          this.stopPolling();
+      evtSource.onerror = () => {
+        // EventSource auto-reconnects — just log it
+        console.log('[sse] connection error, auto-reconnecting...');
+        if (this.isRunning) {
+          this.setStatus('running', 'reconnecting...');
         }
-      } catch (err) {
-        console.error('[poll]', err);
-      }
+      };
+    },
+
+    disconnectStream() {
+      if (this._evtSource) { this._evtSource.close(); this._evtSource = null; }
     },
 
     // ---------- right panel ----------

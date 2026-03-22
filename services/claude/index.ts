@@ -75,13 +75,26 @@ app.post("/upload", async (c) => {
 // ---------- websocket clients ----------
 
 const wsClients = new Map<number, Set<any>>(); // sessionId → Set<ws>
+const sseClients = new Map<number, Set<ReadableStreamDefaultController>>(); // sessionId → Set<SSE controllers>
 
 function broadcast(sessionId: number, msg: any) {
-  const clients = wsClients.get(sessionId);
-  if (!clients) return;
   const data = JSON.stringify(msg);
-  for (const ws of clients) {
-    try { ws.send(data); } catch {}
+
+  // push to WebSocket clients (legacy)
+  const wsSet = wsClients.get(sessionId);
+  if (wsSet) {
+    for (const ws of wsSet) {
+      try { ws.send(data); } catch {}
+    }
+  }
+
+  // push to SSE clients
+  const sseSet = sseClients.get(sessionId);
+  if (sseSet) {
+    const sseData = `data: ${data}\n\n`;
+    for (const ctrl of sseSet) {
+      try { ctrl.enqueue(new TextEncoder().encode(sseData)); } catch {}
+    }
   }
 }
 
@@ -196,6 +209,50 @@ app.post("/sessions/:id/kill", async (c) => {
   await sql`UPDATE upend.session_messages SET status = 'killed' WHERE session_id = ${id} AND status = 'running'`;
   broadcast(id, { type: "status", status: "killed" });
   return c.json({ killed: true });
+});
+
+// ---------- SSE stream ----------
+
+app.get("/sessions/:id/stream", async (c) => {
+  const sessionId = Number(c.req.param("id"));
+  // auth handled by requireAuth middleware (supports ?token= query param)
+
+  let savedController: ReadableStreamDefaultController | null = null;
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      savedController = controller;
+      if (!sseClients.has(sessionId)) sseClients.set(sessionId, new Set());
+      sseClients.get(sessionId)!.add(controller);
+      console.log(`[sse] connected: session ${sessionId} (${sseClients.get(sessionId)!.size} clients)`);
+
+      // heartbeat every 15s keeps connection alive through proxies
+      heartbeat = setInterval(() => {
+        try { controller.enqueue(new TextEncoder().encode(": heartbeat\n\n")); }
+        catch { if (heartbeat) clearInterval(heartbeat); }
+      }, 15000);
+
+      // initial connected event
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: "connected" })}\n\n`));
+    },
+    cancel() {
+      if (savedController) {
+        sseClients.get(sessionId)?.delete(savedController);
+        console.log(`[sse] disconnected: session ${sessionId}`);
+      }
+      if (heartbeat) clearInterval(heartbeat);
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 });
 
 // ---------- session commit (merge to live) ----------

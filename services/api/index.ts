@@ -339,32 +339,39 @@ app.post("/api/tasks/:name/run", requireAuth, async (c) => {
 // ---------- /apps/* (file serving, with auth) ----------
 
 app.get("/apps/*", async (c) => {
-  // check auth — redirect to login instead of JSON 401
-  const header = c.req.header("Authorization");
-  const cookieHeader = c.req.header("Cookie") || "";
-  const cookieToken = cookieHeader.match(/upend_token=([^;]+)/)?.[1];
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : cookieToken;
-
-  if (!token) {
-    // If loaded in an iframe (Sec-Fetch-Dest: iframe), return 401 page instead of
-    // redirecting to dashboard (which causes infinite iframe recursion)
-    if (c.req.header("Sec-Fetch-Dest") === "iframe") {
-      return c.html(`<html><body style="background:#0a0a0a;color:#737373;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>not authenticated — <a href="/" target="_top" style="color:#f97316">log in</a></p></body></html>`, 401);
-    }
-    return c.redirect(`/?next=${encodeURIComponent(c.req.path)}`);
-  }
-
-  try {
-    const { verifyToken } = await import("../../lib/auth");
-    await verifyToken(token);
-  } catch {
-    if (c.req.header("Sec-Fetch-Dest") === "iframe") {
-      return c.html(`<html><body style="background:#0a0a0a;color:#737373;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>session expired — <a href="/" target="_top" style="color:#f97316">log in</a></p></body></html>`, 401);
-    }
-    return c.redirect(`/?next=${encodeURIComponent(c.req.path)}`);
-  }
-
+  // check if this app is public (has a 'public' marker file)
+  const appName = c.req.path.replace("/apps/", "").split("/")[0];
   const root = resolveRoot(c);
+  const isPublicApp = [join(root, "apps", appName, "public"), join(PROJECT_ROOT, "apps", appName, "public")]
+    .some(p => existsSync(p));
+
+  if (!isPublicApp) {
+    // check auth — redirect to login instead of JSON 401
+    const header = c.req.header("Authorization");
+    const cookieHeader = c.req.header("Cookie") || "";
+    const cookieToken = cookieHeader.match(/upend_token=([^;]+)/)?.[1];
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : cookieToken;
+
+    if (!token) {
+      // If loaded in an iframe (Sec-Fetch-Dest: iframe), return 401 page instead of
+      // redirecting to dashboard (which causes infinite iframe recursion)
+      if (c.req.header("Sec-Fetch-Dest") === "iframe") {
+        return c.html(`<html><body style="background:#0a0a0a;color:#737373;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>not authenticated — <a href="/" target="_top" style="color:#f97316">log in</a></p></body></html>`, 401);
+      }
+      return c.redirect(`/?next=${encodeURIComponent(c.req.path)}`);
+    }
+
+    try {
+      const { verifyToken } = await import("../../lib/auth");
+      await verifyToken(token);
+    } catch {
+      if (c.req.header("Sec-Fetch-Dest") === "iframe") {
+        return c.html(`<html><body style="background:#0a0a0a;color:#737373;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>session expired — <a href="/" target="_top" style="color:#f97316">log in</a></p></body></html>`, 401);
+      }
+      return c.redirect(`/?next=${encodeURIComponent(c.req.path)}`);
+    }
+  }
+
   const path = c.req.path.replace("/apps/", "");
   for (const base of [join(root, "apps"), join(PROJECT_ROOT, "apps")]) {
     const filePath = join(base, path);
@@ -384,9 +391,17 @@ app.get("/apps/*", async (c) => {
 
 const serviceCache = new Map<string, { mod: any; mtime: number }>();
 
-app.all("/services/:name/*", requireAuth, async (c) => {
+app.all("/services/:name/*", async (c) => {
   const root = resolveRoot(c);
   const serviceName = c.req.param("name");
+  const isPublicService = [join(root, "services", serviceName, "public"), join(PROJECT_ROOT, "services", serviceName, "public")]
+    .some(p => existsSync(p));
+
+  if (!isPublicService) {
+    const authResult = await requireAuth(c, async () => {});
+    if (authResult) return authResult;
+  }
+
   for (const base of [root, PROJECT_ROOT]) {
     const entryPath = join(base, "services", serviceName, "index.ts");
     if (existsSync(entryPath)) return dispatchService(c, entryPath, serviceName);

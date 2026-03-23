@@ -575,6 +575,12 @@
               <span x-show="wf._result !== undefined && !wf._running"
                 :class="wf._result === 0 ? 'text-green-400' : 'text-red-400'"
                 class="text-xs" x-text="wf._result === 0 ? 'success' : 'failed'"></span>
+              <button x-show="wf.cron" @click="toggleTask(wf)" :title="wf.disabled ? 'Enable cron' : 'Disable cron'"
+                class="relative w-8 h-4 rounded-full transition-colors cursor-pointer"
+                :class="wf.disabled ? 'bg-gray-600' : 'bg-accent'">
+                <span class="absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform"
+                  :class="wf.disabled ? '' : 'translate-x-4'"></span>
+              </button>
               <button @click="runTask(wf)"
                 :disabled="wf._running"
                 class="text-xs text-muted border border-border px-2 py-1 rounded cursor-pointer hover:text-accent hover:border-accent font-mono disabled:opacity-40">run</button>
@@ -1868,6 +1874,16 @@ function dashboard() {
       try {
         const res = await this.authFetch('/api/services');
         if (res.ok) this.servicesList = await res.json();
+      } catch {}
+    },
+
+    async toggleTask(wf) {
+      try {
+        const res = await this.authFetch(`/api/tasks/${wf.name}/toggle`, { method: 'PATCH' });
+        if (res.ok) {
+          const data = await res.json();
+          wf.disabled = data.disabled;
+        }
       } catch {}
     },
 

@@ -5,7 +5,7 @@ import { cors } from "hono/cors";
 import { authRoutes, jwksHandler } from "./auth-routes";
 import { sql } from "../../lib/db";
 import { requireAuth } from "../../lib/middleware";
-import { existsSync, statSync, readdirSync, readFileSync } from "fs";
+import { existsSync, statSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const app = new Hono();
@@ -273,16 +273,51 @@ app.get("/api/tasks", requireAuth, async (c) => {
       const content = readFileSync(join(tasksDir, file), "utf-8");
       const cronMatch = content.match(/\/\/\s*@cron\s+(.+)/);
       const descMatch = content.match(/\/\/\s*@description\s+(.+)/);
+      const disabled = /\/\/\s*@disabled/.test(content);
       tasks.push({
         name: file.replace(/\.(ts|js)$/, ""),
         file,
         cron: cronMatch ? cronMatch[1].trim() : null,
         description: descMatch ? descMatch[1].trim() : "",
+        disabled,
         source: base === root && root !== PROJECT_ROOT ? "session" : "main",
       });
     }
   }
   return c.json(tasks);
+});
+
+// toggle task enabled/disabled
+app.patch("/api/tasks/:name/toggle", requireAuth, async (c) => {
+  const name = c.req.param("name");
+  const root = resolveRoot(c);
+  let filePath: string | null = null;
+  for (const base of [root, PROJECT_ROOT]) {
+    for (const ext of [".ts", ".js"]) {
+      const candidate = join(base, "tasks", name + ext);
+      if (existsSync(candidate)) { filePath = candidate; break; }
+    }
+    if (filePath) break;
+  }
+  if (!filePath) return c.json({ error: "task not found" }, 404);
+
+  let content = readFileSync(filePath, "utf-8");
+  const isDisabled = /\/\/\s*@disabled/.test(content);
+  if (isDisabled) {
+    content = content.replace(/\/\/\s*@disabled\n?/, "");
+  } else {
+    // insert @disabled after the last annotation comment (after @cron or @description)
+    const lastAnnotation = [...content.matchAll(/\/\/\s*@(?:cron|description)\s+.+\n/g)];
+    if (lastAnnotation.length > 0) {
+      const last = lastAnnotation[lastAnnotation.length - 1];
+      const pos = last.index! + last[0].length;
+      content = content.slice(0, pos) + "// @disabled\n" + content.slice(pos);
+    } else {
+      content = "// @disabled\n" + content;
+    }
+  }
+  writeFileSync(filePath, content);
+  return c.json({ name, disabled: !isDisabled });
 });
 
 // services introspection
@@ -504,7 +539,8 @@ function loadCronTasks(): { name: string; cron: string; filePath: string }[] {
       .map(file => {
         const content = readFileSync(join(tasksDir, file), "utf-8");
         const cronMatch = content.match(/\/\/\s*@cron\s+(.+)/);
-        return cronMatch
+        const disabled = /\/\/\s*@disabled/.test(content);
+        return cronMatch && !disabled
           ? { name: file.replace(/\.(ts|js)$/, ""), cron: cronMatch[1].trim(), filePath: join(tasksDir, file) }
           : null;
       })
